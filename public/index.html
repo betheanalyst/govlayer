@@ -1,0 +1,2340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="GovLayer — Constitutional AI-assisted governance protocol on GenLayer">
+<meta name="theme-color" content="#14131A" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#FAFAF7" media="(prefers-color-scheme: light)">
+<meta property="og:title" content="GovLayer — Constitutional Governance">
+<meta property="og:description" content="AI-assisted governance protocol. Propose, vote, and govern with constitutional oversight.">
+<title>GovLayer — Constitutional Governance</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..400&family=DM+Sans:ital,opsz,wght@0,9..40,300..500;1,9..40,300..400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+/* ══════════════════════════════════════════════════════════
+   GOVLAYER DESIGN TOKENS
+   ══════════════════════════════════════════════════════════ */
+:root {
+  /* Ink ramp */
+  --ink-950: #14131A; --ink-900: #211F2B; --ink-700: #42404F;
+  --ink-500: #6B6878; --ink-400: #908DA0; --ink-300: #C4C2CF;
+  --ink-200: #E0DFE8; --ink-100: #F0EFF5;
+
+  /* Parchment surface */
+  --surface: #FAFAF7; --surface-card: #F3F2EE;
+  --surface-hover: #EDECEA; --surface-border: #DDD9D1;
+
+  /* Violet accent */
+  --violet-700: #3930A8; --violet-600: #4F43D4; --violet-500: #6558E8;
+  --violet-400: #8F84F0; --violet-200: #C8C3FA; --violet-100: #E8E6FD;
+  --violet-50: #F3F1FE;
+
+  /* Status tokens */
+  --s-pending-bg: #ECEAFD; --s-pending-text: #3930A8; --s-pending-border: #B8B1F5; --s-pending-dot: #6558E8;
+  --s-revision-bg: #FDF2E4; --s-revision-text: #8A4A08; --s-revision-border: #EFC07A; --s-revision-dot: #C97B2A;
+  --s-accepted-bg: #E4F5EE; --s-accepted-text: #175239; --s-accepted-border: #7DCBA3; --s-accepted-dot: #1E7A52;
+  --s-rejected-bg: #FCE8E8; --s-rejected-text: #8A1A1A; --s-rejected-border: #E89A9A; --s-rejected-dot: #C23B3B;
+  --s-review-bg: #E4EEF9; --s-review-text: #1A4A85; --s-review-border: #85B5E8; --s-review-dot: #3B7DD8;
+  --s-confirm-bg: #F0E8FB; --s-confirm-text: #4E2280; --s-confirm-border: #BF98E0; --s-confirm-dot: #7A4FA8;
+  --s-cancelled-bg: #F0EFF5; --s-cancelled-text: #6B6878; --s-cancelled-border: #C4C2CF; --s-cancelled-dot: #908DA0;
+
+  /* Semantic */
+  --text-primary: var(--ink-950); --text-secondary: var(--ink-500);
+  --text-tertiary: var(--ink-400); --text-info: var(--violet-600);
+  --border: var(--surface-border); --border-subtle: var(--ink-100);
+
+  /* Typography */
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+
+  /* Motion */
+  --ease-spring: cubic-bezier(.34,1.56,.64,1);
+  --ease-out: cubic-bezier(.16,1,.3,1);
+  --dur-fast: 100ms; --dur-base: 200ms; --dur-slow: 350ms;
+
+  /* Layout */
+  --nav-h: 56px; --tab-h: 60px;
+  --max-w: 1160px; --sidebar-w: 300px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #0E0D12; --surface-card: #18171E;
+    --surface-hover: #201F28; --surface-border: #2C2A36;
+    --text-primary: #E8E6F0; --text-secondary: #9B98A8;
+    --text-tertiary: #6B6878; --border: #2C2A36; --border-subtle: #201F28;
+    --s-pending-bg: #1A1848; --s-pending-text: #BAB2F7; --s-pending-border: #3B3480;
+    --s-revision-bg: #2A1A08; --s-revision-text: #E0A860; --s-revision-border: #5C3A10;
+    --s-accepted-bg: #0A2218; --s-accepted-text: #5EC898; --s-accepted-border: #174D35;
+    --s-rejected-bg: #2A0A0A; --s-rejected-text: #E88888; --s-rejected-border: #5A1818;
+    --s-review-bg: #0A1E35; --s-review-text: #78AEED; --s-review-border: #1A4070;
+    --s-confirm-bg: #1E0A38; --s-confirm-text: #C098E8; --s-confirm-border: #4A1878;
+    --s-cancelled-bg: #18171E; --s-cancelled-text: #6B6878; --s-cancelled-border: #2C2A36;
+    --violet-50: #1A1848; --violet-100: #221B58; --violet-200: #3B3480;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   RESET & BASE
+   ══════════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body {
+  font-family: var(--font-sans); font-size: 14px; line-height: 1.5;
+  color: var(--text-primary); background: var(--surface);
+  min-height: 100dvh; -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; }
+input, textarea, select { font-family: inherit; }
+
+/* ══════════════════════════════════════════════════════════
+   LAYOUT
+   ══════════════════════════════════════════════════════════ */
+.app { display: flex; flex-direction: column; min-height: 100dvh; }
+.page-body { flex: 1; padding-bottom: calc(var(--tab-h) + 16px); }
+@media (min-width: 768px) { .page-body { padding-bottom: 48px; } }
+.container { width: 100%; max-width: var(--max-w); margin: 0 auto; padding: 0 16px; }
+@media (min-width: 768px) { .container { padding: 0 24px; } }
+@media (min-width: 1024px) { .container { padding: 0 32px; } }
+
+/* ══════════════════════════════════════════════════════════
+   NAVIGATION
+   ══════════════════════════════════════════════════════════ */
+.nav {
+  height: var(--nav-h); border-bottom: .5px solid var(--border);
+  background: var(--surface); position: sticky; top: 0; z-index: 100;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  display: none;
+}
+@media (min-width: 768px) { .nav { display: flex; align-items: center; } }
+.nav-inner { display: flex; align-items: center; gap: 0; width: 100%; max-width: var(--max-w); margin: 0 auto; padding: 0 24px; height: 100%; }
+.nav-logo { display: flex; align-items: center; gap: 9px; margin-right: 4px; padding-right: 20px; border-right: .5px solid var(--border); cursor: pointer; flex-shrink: 0; }
+.nav-logo-mark { width: 26px; height: 26px; background: var(--violet-500); border-radius: 7px; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-size: 13px; font-weight: 600; color: #fff; flex-shrink: 0; }
+.nav-logo-text { font-family: var(--font-display); font-size: 15px; font-weight: 400; color: var(--text-primary); letter-spacing: -.01em; }
+.nav-links { display: flex; align-items: stretch; height: 100%; }
+.nav-link { display: flex; align-items: center; padding: 0 14px; font-size: 13px; font-weight: 400; color: var(--text-secondary); border-bottom: 2px solid transparent; transition: color var(--dur-fast), border-color var(--dur-fast); cursor: pointer; white-space: nowrap; background: none; border-top: none; border-left: none; border-right: none; }
+.nav-link:hover { color: var(--text-primary); }
+.nav-link.active { color: var(--text-primary); border-bottom-color: var(--violet-500); font-weight: 500; }
+.nav-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.eligibility-chip { padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: 500; border: .5px solid; cursor: default; white-space: nowrap; }
+.admin-chip { background: var(--s-confirm-bg); color: var(--s-confirm-text); border: .5px solid var(--s-confirm-border); padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: opacity var(--dur-fast); white-space: nowrap; }
+.admin-chip:hover { opacity: .8; }
+.wallet-btn { padding: 6px 14px; border-radius: 7px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; border: .5px solid var(--border); background: var(--surface-card); color: var(--text-secondary); transition: all var(--dur-fast); cursor: pointer; white-space: nowrap; }
+.wallet-btn:hover { background: var(--surface-hover); color: var(--text-primary); }
+.wallet-btn.connected { color: var(--text-info); border-color: var(--violet-200); background: var(--violet-50); }
+
+/* Mobile header */
+.mobile-header { height: 52px; display: flex; align-items: center; padding: 0 16px; border-bottom: .5px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 100; }
+@media (min-width: 768px) { .mobile-header { display: none; } }
+.mobile-logo { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-size: 15px; font-weight: 400; color: var(--text-primary); }
+.mobile-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+
+/* Tab bar */
+.tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: var(--tab-h); background: var(--surface); border-top: .5px solid var(--border); display: flex; z-index: 200; padding-bottom: env(safe-area-inset-bottom); }
+@media (min-width: 768px) { .tab-bar { display: none; } }
+.tab-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; cursor: pointer; transition: color var(--dur-fast); color: var(--text-tertiary); font-size: 10px; font-weight: 500; letter-spacing: .02em; -webkit-tap-highlight-color: transparent; padding: 8px 4px; background: none; border: none; }
+.tab-item.active { color: var(--violet-600); }
+.tab-item svg { width: 22px; height: 22px; flex-shrink: 0; }
+.tab-icon-wrap { position: relative; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; }
+.tab-badge { position: absolute; top: -2px; right: -4px; width: 14px; height: 14px; background: var(--s-confirm-dot); border-radius: 50%; font-size: 8px; font-weight: 700; color: #fff; display: flex; align-items: center; justify-content: center; border: 1.5px solid var(--surface); }
+
+/* ══════════════════════════════════════════════════════════
+   ACTION BANNER
+   ══════════════════════════════════════════════════════════ */
+.action-banner { background: var(--violet-50); border-bottom: .5px solid var(--violet-100); padding: 10px 0; }
+.action-banner-inner { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.action-banner-text { flex: 1; color: var(--text-info); }
+.btn-banner { padding: 5px 14px; background: var(--violet-500); color: #fff; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: opacity var(--dur-fast); flex-shrink: 0; }
+.btn-banner:hover { opacity: .88; }
+
+/* ══════════════════════════════════════════════════════════
+   PAGE HEADER
+   ══════════════════════════════════════════════════════════ */
+.page-header { padding: 24px 0 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+@media (min-width: 768px) { .page-header { padding: 32px 0 24px; } }
+.page-title { font-family: var(--font-display); font-size: 26px; font-weight: 350; letter-spacing: -.025em; line-height: 1.1; }
+@media (min-width: 768px) { .page-title { font-size: 32px; } }
+.page-header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filter-row { display: flex; gap: 2px; background: var(--surface-card); border: .5px solid var(--border); border-radius: 7px; padding: 3px; }
+.filter-btn { padding: 5px 12px; border-radius: 5px; font-size: 12px; font-weight: 500; color: var(--text-secondary); background: transparent; border: none; cursor: pointer; transition: all var(--dur-fast); white-space: nowrap; }
+.filter-btn:hover { color: var(--text-primary); }
+.filter-btn.active { background: var(--surface); color: var(--text-primary); border: .5px solid var(--border); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+
+/* ══════════════════════════════════════════════════════════
+   FEED LAYOUT
+   ══════════════════════════════════════════════════════════ */
+.feed-layout { display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start; }
+@media (min-width: 900px) { .feed-layout { grid-template-columns: 1fr var(--sidebar-w); } }
+.feed-list { display: flex; flex-direction: column; gap: 8px; }
+
+/* ══════════════════════════════════════════════════════════
+   STATUS BADGE
+   ══════════════════════════════════════════════════════════ */
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 500; letter-spacing: .01em; border: .5px solid transparent; flex-shrink: 0; white-space: nowrap; }
+.badge-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.badge.pending { background: var(--s-pending-bg); color: var(--s-pending-text); border-color: var(--s-pending-border); }
+.badge.pending .badge-dot { background: var(--s-pending-dot); animation: pulse-dot 2s ease-in-out infinite; }
+.badge.needs_revision { background: var(--s-revision-bg); color: var(--s-revision-text); border-color: var(--s-revision-border); }
+.badge.needs_revision .badge-dot { background: var(--s-revision-dot); animation: pulse-dot 2s ease-in-out infinite; }
+.badge.accepted { background: var(--s-accepted-bg); color: var(--s-accepted-text); border-color: var(--s-accepted-border); }
+.badge.accepted .badge-dot { background: var(--s-accepted-dot); }
+.badge.rejected { background: var(--s-rejected-bg); color: var(--s-rejected-text); border-color: var(--s-rejected-border); }
+.badge.rejected .badge-dot { background: var(--s-rejected-dot); }
+.badge.under_review { background: var(--s-review-bg); color: var(--s-review-text); border-color: var(--s-review-border); }
+.badge.under_review .badge-dot { background: var(--s-review-dot); animation: pulse-dot 1.4s ease-in-out infinite; }
+.badge.pending_constitution_confirm { background: var(--s-confirm-bg); color: var(--s-confirm-text); border-color: var(--s-confirm-border); }
+.badge.pending_constitution_confirm .badge-dot { background: var(--s-confirm-dot); animation: pulse-dot 2s ease-in-out infinite; }
+.badge.cancelled { background: var(--s-cancelled-bg); color: var(--s-cancelled-text); border-color: var(--s-cancelled-border); }
+.badge.cancelled .badge-dot { background: var(--s-cancelled-dot); }
+.badge.constitution-type { background: var(--ink-900); color: var(--violet-200); border-color: var(--violet-700); font-size: 10px; }
+@keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* ══════════════════════════════════════════════════════════
+   COUNTDOWN TIMER
+   ══════════════════════════════════════════════════════════ */
+.timer { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; border: .5px solid var(--s-pending-border); background: var(--s-pending-bg); color: var(--s-pending-text); white-space: nowrap; flex-shrink: 0; }
+.timer.urgent { border-color: var(--s-revision-border); background: var(--s-revision-bg); color: var(--s-revision-text); animation: timer-pulse 1.5s ease-in-out infinite; }
+.timer.closed { background: var(--surface-card); border-color: var(--border); color: var(--text-tertiary); }
+.timer.finalize-ready { background: var(--s-revision-bg); border-color: var(--s-revision-border); color: var(--s-revision-text); }
+.timer.cooldown { border-color: var(--s-revision-border); background: var(--s-revision-bg); color: var(--s-revision-text); }
+@keyframes timer-pulse { 0%,100% { opacity: 1; } 50% { opacity: .7; } }
+
+/* ══════════════════════════════════════════════════════════
+   VOTE BAR
+   ══════════════════════════════════════════════════════════ */
+.vote-track { height: 7px; background: var(--surface-card); border-radius: 9999px; overflow: visible; border: .5px solid var(--border); position: relative; }
+.vote-yes { position: absolute; left: 0; top: 0; bottom: 0; background: var(--s-accepted-dot); border-radius: 9999px 0 0 9999px; transition: width var(--dur-slow) var(--ease-out); }
+.vote-no { position: absolute; right: 0; top: 0; bottom: 0; background: var(--s-rejected-dot); border-radius: 0 9999px 9999px 0; transition: width var(--dur-slow) var(--ease-out); }
+.quorum-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--violet-500); border-radius: 1px; z-index: 2; }
+.vote-labels { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 12px; }
+.vote-yes-label { color: var(--s-accepted-text); font-weight: 500; }
+.vote-no-label { color: var(--s-rejected-text); font-weight: 500; }
+.quorum-info { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--violet-600); margin-top: 5px; }
+.quorum-marker { width: 8px; height: 8px; border-radius: 2px; background: var(--violet-500); flex-shrink: 0; }
+
+/* ══════════════════════════════════════════════════════════
+   PROPOSAL CARD
+   ══════════════════════════════════════════════════════════ */
+.proposal-card { background: var(--surface-card); border: .5px solid var(--border); border-radius: 10px; padding: 16px; cursor: pointer; transition: border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast); animation: card-enter var(--dur-slow) var(--ease-out) both; -webkit-tap-highlight-color: transparent; }
+.proposal-card:hover { border-color: var(--ink-300); background: var(--surface); transform: translateY(-1px); }
+.proposal-card.selected { border-color: var(--violet-400); background: var(--surface); }
+@keyframes card-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+.card-badges { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 6px; }
+.card-title { font-size: 14px; font-weight: 500; color: var(--text-primary); line-height: 1.35; flex: 1; }
+.card-meta { font-size: 11px; color: var(--text-tertiary); display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; font-family: var(--font-mono); }
+.card-bottom { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.ai-chip { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-tertiary); }
+.ai-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.card-cta { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: var(--violet-50); border: .5px solid var(--violet-100); border-radius: 6px; font-size: 11px; font-weight: 500; color: var(--violet-600); transition: background var(--dur-fast); flex-shrink: 0; }
+.card-cta:hover { background: var(--violet-100); }
+.mini-bar-wrap { height: 4px; border-radius: 9999px; background: var(--surface-hover); overflow: hidden; position: relative; margin-bottom: 8px; border: .5px solid var(--border); }
+.mini-bar-yes { height: 100%; background: var(--s-accepted-dot); border-radius: 9999px 0 0 9999px; position: absolute; left: 0; top: 0; transition: width .6s var(--ease-out); }
+.mini-bar-no { height: 100%; background: var(--s-rejected-dot); border-radius: 0 9999px 9999px 0; position: absolute; right: 0; top: 0; transition: width .6s var(--ease-out); }
+
+/* ══════════════════════════════════════════════════════════
+   SIDEBAR / PANELS
+   ══════════════════════════════════════════════════════════ */
+.sidebar { display: flex; flex-direction: column; gap: 10px; }
+.sidebar-card { background: var(--surface-card); border: .5px solid var(--border); border-radius: 10px; overflow: hidden; }
+.sidebar-section { padding: 14px 16px; border-bottom: .5px solid var(--border); }
+.sidebar-section:last-child { border-bottom: none; }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.stat-cell { background: var(--surface); border: .5px solid var(--border); border-radius: 7px; padding: 10px 12px; }
+.stat-val { font-size: 20px; font-weight: 500; color: var(--text-primary); line-height: 1; font-family: var(--font-display); }
+.stat-key { font-size: 11px; color: var(--text-tertiary); margin-top: 3px; }
+.roster-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: .5px solid var(--border); }
+.roster-row:last-child { border-bottom: none; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+.history-entry { padding: 8px 0; border-bottom: .5px solid var(--border); }
+.history-entry:last-child { border-bottom: none; }
+.log-ts { font-size: 11px; font-family: var(--font-mono); color: var(--text-tertiary); margin-top: 2px; }
+
+/* ══════════════════════════════════════════════════════════
+   AI AUDIT PANEL
+   ══════════════════════════════════════════════════════════ */
+.audit-panel { background: var(--surface-card); border: .5px solid var(--border); border-radius: 10px; overflow: hidden; }
+.audit-header { padding: 12px 16px; border-bottom: .5px solid var(--border); display: flex; align-items: center; gap: 10px; }
+.audit-icon { width: 22px; height: 22px; background: var(--violet-500); border-radius: 5px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 8px; font-weight: 700; color: #fff; flex-shrink: 0; }
+.audit-source-title { font-size: 12px; font-weight: 500; color: var(--text-primary); }
+.audit-source-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }
+.verdict-chip { padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 500; border: .5px solid; flex-shrink: 0; }
+.verdict-accept { background: var(--s-accepted-bg); color: var(--s-accepted-text); border-color: var(--s-accepted-border); }
+.verdict-revise { background: var(--s-revision-bg); color: var(--s-revision-text); border-color: var(--s-revision-border); }
+.verdict-reject { background: var(--s-rejected-bg); color: var(--s-rejected-text); border-color: var(--s-rejected-border); }
+.audit-body { padding: 14px 16px; }
+.audit-reasoning { font-size: 13px; line-height: 1.65; color: var(--text-primary); margin-bottom: 14px; }
+.conflict-list { display: flex; flex-direction: column; gap: 7px; }
+.conflict-item { border: .5px solid var(--s-revision-border); background: var(--s-revision-bg); border-radius: 7px; padding: 9px 12px; }
+.conflict-clause { font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--s-revision-text); margin-bottom: 3px; }
+.conflict-text { font-size: 12px; color: var(--s-revision-text); line-height: 1.5; opacity: .85; }
+.audit-expand { width: 100%; padding: 9px 16px; text-align: left; font-size: 12px; color: var(--text-tertiary); border-top: .5px solid var(--border); background: transparent; cursor: pointer; transition: color var(--dur-fast), background var(--dur-fast); display: flex; align-items: center; gap: 4px; }
+.audit-expand:hover { color: var(--text-primary); background: var(--surface-hover); }
+
+/* ══════════════════════════════════════════════════════════
+   DETAIL LAYOUT
+   ══════════════════════════════════════════════════════════ */
+.detail-layout { display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start; }
+@media (min-width: 860px) { .detail-layout { grid-template-columns: 1fr 280px; } }
+.detail-main { display: flex; flex-direction: column; gap: 16px; }
+.back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); padding: 5px 10px; border: .5px solid var(--border); border-radius: 6px; background: var(--surface-card); cursor: pointer; transition: all var(--dur-fast); margin-bottom: 16px; }
+.back-link:hover { color: var(--text-primary); border-color: var(--ink-300); }
+.prop-meta-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
+.prop-num { font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); }
+.prop-detail-title { font-family: var(--font-display); font-size: 22px; font-weight: 350; letter-spacing: -.02em; line-height: 1.2; margin-bottom: 8px; }
+@media (min-width: 768px) { .prop-detail-title { font-size: 27px; } }
+.prop-submeta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono); }
+.content-card { background: var(--surface-card); border: .5px solid var(--border); border-radius: 10px; padding: 16px; }
+.prop-description { font-size: 14px; line-height: 1.7; color: var(--text-primary); }
+.vote-yes-label { color: var(--s-accepted-text); font-weight: 500; }
+.vote-no-label { color: var(--s-rejected-text); font-weight: 500; }
+.vote-buttons { display: flex; gap: 8px; margin-top: 6px; }
+.btn-vote-for { flex: 1; padding: 10px 16px; background: var(--s-accepted-dot); color: #fff; border: none; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: opacity var(--dur-fast), transform var(--dur-fast); }
+.btn-vote-for:hover { opacity: .88; transform: translateY(-1px); }
+.btn-vote-against { flex: 1; padding: 10px 16px; background: var(--surface); border: .5px solid var(--border); color: var(--text-primary); border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all var(--dur-fast); }
+.btn-vote-against:hover { background: var(--s-rejected-bg); border-color: var(--s-rejected-border); color: var(--s-rejected-text); }
+.already-voted-msg { display: flex; align-items: center; gap: 7px; padding: 10px 14px; background: var(--surface); border: .5px solid var(--border); border-radius: 8px; font-size: 13px; color: var(--text-secondary); margin-top: 8px; }
+.voted-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* Dispute timeline */
+.dispute-timeline { display: flex; flex-direction: column; }
+.dispute-stage { display: flex; gap: 12px; }
+.stage-line-col { display: flex; flex-direction: column; align-items: center; }
+.stage-num { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0; }
+.stage-connector { width: 1px; flex: 1; min-height: 24px; background: var(--border); margin: 3px 0; }
+.stage-content { flex: 1; padding-bottom: 20px; }
+.stage-label { font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .07em; color: var(--text-tertiary); margin-bottom: 4px; }
+.stage-reason { font-size: 13px; color: var(--text-primary); margin-bottom: 4px; line-height: 1.5; }
+.stage-resolution { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.stage-ts { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); margin-top: 4px; }
+
+/* Diff */
+.diff-wrap { border: .5px solid var(--border); border-radius: 8px; overflow: hidden; font-family: var(--font-mono); font-size: 12px; }
+.diff-header { padding: 8px 14px; background: var(--surface-card); border-bottom: .5px solid var(--border); font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; color: var(--text-tertiary); display: flex; justify-content: space-between; }
+.diff-line { padding: 5px 14px; line-height: 1.5; }
+.diff-same { color: var(--text-secondary); }
+.diff-removed { background: var(--s-rejected-bg); color: var(--s-rejected-text); text-decoration: line-through; }
+.diff-added { background: var(--s-accepted-bg); color: var(--s-accepted-text); }
+.diff-marker { font-size: 10px; margin-right: 6px; opacity: .7; }
+
+/* ══════════════════════════════════════════════════════════
+   BUTTONS
+   ══════════════════════════════════════════════════════════ */
+.btn-primary { padding: 9px 18px; background: var(--violet-500); color: #fff; border: none; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: opacity var(--dur-fast), transform var(--dur-fast); display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.btn-primary:hover { opacity: .88; }
+.btn-primary:active { transform: scale(.98); }
+.btn-primary:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+.btn-primary.full-w { width: 100%; }
+.btn-secondary { padding: 9px 18px; background: var(--surface); border: .5px solid var(--border); color: var(--text-primary); border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all var(--dur-fast); display: inline-flex; align-items: center; gap: 6px; }
+.btn-secondary:hover { background: var(--surface-hover); border-color: var(--ink-300); }
+.btn-secondary.full-w { width: 100%; justify-content: center; }
+.btn-danger { padding: 9px 18px; background: var(--surface); border: .5px solid var(--s-rejected-border); color: var(--s-rejected-text); border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all var(--dur-fast); display: inline-flex; align-items: center; gap: 6px; }
+.btn-danger:hover { background: var(--s-rejected-bg); }
+.btn-danger.full-w { width: 100%; justify-content: center; }
+
+/* ══════════════════════════════════════════════════════════
+   FORMS
+   ══════════════════════════════════════════════════════════ */
+.form-card { background: var(--surface-card); border: .5px solid var(--border); border-radius: 10px; overflow: hidden; }
+.form-section { padding: 16px 18px; border-bottom: .5px solid var(--border); }
+.form-section:last-child { border-bottom: none; }
+.field { margin-bottom: 16px; }
+.field:last-child { margin-bottom: 0; }
+.field-label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: var(--text-primary); margin-bottom: 6px; }
+.field-hint { font-size: 11px; color: var(--text-tertiary); font-weight: 400; }
+.field-input { width: 100%; padding: 9px 12px; border: .5px solid var(--border); border-radius: 7px; font-size: 14px; color: var(--text-primary); background: var(--surface); outline: none; transition: border-color var(--dur-fast), box-shadow var(--dur-fast); resize: vertical; }
+.field-input:focus { border-color: var(--violet-400); box-shadow: 0 0 0 3px rgba(101,88,232,.12); }
+.char-count-wrap { position: relative; }
+.char-count { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); pointer-events: none; }
+.type-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.type-opt { padding: 12px; border: .5px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--surface); transition: all var(--dur-fast); text-align: left; }
+.type-opt:hover { border-color: var(--ink-300); background: var(--surface-hover); }
+.type-opt.selected { border-color: var(--violet-400); background: var(--violet-50); }
+.type-opt-title { font-size: 13px; font-weight: 500; color: var(--text-primary); margin-bottom: 3px; }
+.type-opt-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+.type-opt.selected .type-opt-title { color: var(--text-info); }
+.duration-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dur-chip { padding: 5px 14px; border: .5px solid var(--border); border-radius: 9999px; font-size: 12px; font-weight: 500; color: var(--text-secondary); background: var(--surface); cursor: pointer; transition: all var(--dur-fast); }
+.dur-chip:hover { border-color: var(--ink-300); color: var(--text-primary); }
+.dur-chip.selected { background: var(--violet-50); border-color: var(--violet-200); color: var(--violet-600); }
+.constitution-hint { margin-top: 10px; padding: 10px 14px; background: var(--violet-50); border: .5px solid var(--violet-100); border-radius: 7px; cursor: pointer; transition: background var(--dur-fast); }
+.constitution-hint:hover { background: var(--violet-100); }
+.hint-label { font-size: 11px; font-weight: 500; color: var(--text-info); margin-bottom: 4px; display: flex; align-items: center; gap: 4px; }
+.hint-quote { font-size: 12px; color: var(--text-info); font-style: italic; line-height: 1.5; opacity: .85; }
+.form-note { font-size: 11px; color: var(--text-tertiary); text-align: center; margin-top: 6px; }
+.revision-panel { background: var(--s-revision-bg); border: .5px solid var(--s-revision-border); border-radius: 10px; overflow: hidden; }
+.revision-header { padding: 12px 16px; border-bottom: .5px solid var(--s-revision-border); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.revision-title { font-size: 13px; font-weight: 500; color: var(--s-revision-text); display: flex; align-items: center; gap: 7px; }
+.revision-icon { width: 18px; height: 18px; border-radius: 50%; background: var(--s-revision-dot); color: #fff; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.revision-count-chip { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 9999px; background: rgba(0,0,0,.08); color: var(--s-revision-text); }
+.revision-body { padding: 14px 16px; }
+.checklist-item { display: flex; gap: 10px; align-items: flex-start; padding-bottom: 12px; margin-bottom: 12px; border-bottom: .5px solid var(--s-revision-border); }
+.checklist-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.check-num { width: 20px; height: 20px; border-radius: 50%; background: var(--s-revision-dot); color: #fff; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+.check-clause { font-size: 11px; font-weight: 500; color: var(--s-revision-text); font-family: var(--font-mono); margin-bottom: 3px; }
+.check-issue { font-size: 12px; color: var(--s-revision-text); line-height: 1.55; opacity: .85; }
+
+/* ══════════════════════════════════════════════════════════
+   LOADING / ERROR / EMPTY STATES
+   ══════════════════════════════════════════════════════════ */
+.empty-state { text-align: center; padding: 56px 24px; background: var(--surface-card); border: .5px solid var(--border); border-radius: 10px; }
+.empty-icon { width: 52px; height: 52px; background: var(--violet-50); border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 24px; margin: 0 auto 16px; }
+.empty-title { font-family: var(--font-display); font-size: 18px; font-weight: 350; color: var(--text-primary); margin-bottom: 8px; }
+.empty-sub { font-size: 13px; color: var(--text-secondary); line-height: 1.6; max-width: 320px; margin: 0 auto 20px; }
+.skeleton-card { background: var(--surface-card); border: .5px solid var(--border); border-radius: 10px; padding: 16px; animation: skel-pulse 1.6s ease-in-out infinite; }
+@keyframes skel-pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+.sk-line { height: 12px; background: var(--surface-hover); border-radius: 3px; margin-bottom: 8px; }
+.sk-badge { height: 22px; width: 90px; background: var(--surface-hover); border-radius: 9999px; margin-bottom: 10px; }
+.sk-bar { height: 4px; background: var(--surface-hover); border-radius: 9999px; margin: 10px 0; }
+.error-banner { background: var(--s-rejected-bg); border: .5px solid var(--s-rejected-border); border-radius: 8px; padding: 14px 16px; display: flex; gap: 10px; font-size: 13px; }
+.error-title { font-weight: 500; color: var(--s-rejected-text); margin-bottom: 3px; }
+.error-msg { font-size: 12px; color: var(--s-rejected-text); line-height: 1.5; margin-bottom: 8px; opacity: .85; }
+.error-retry { font-size: 12px; color: var(--s-rejected-dot); font-weight: 500; background: none; border: none; cursor: pointer; text-decoration: underline; padding: 0; }
+.network-banner { background: var(--s-review-bg); border: .5px solid var(--s-review-border); border-radius: 8px; padding: 12px 16px; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--s-review-text); margin-bottom: 16px; }
+
+/* ══════════════════════════════════════════════════════════
+   TOAST
+   ══════════════════════════════════════════════════════════ */
+.toast-container { position: fixed; bottom: calc(var(--tab-h) + 12px); right: 16px; left: 16px; z-index: 300; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+@media (min-width: 768px) { .toast-container { bottom: 24px; left: auto; width: 340px; } }
+.toast { background: var(--surface); border: .5px solid var(--border); border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; gap: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.12); pointer-events: all; animation: toast-enter var(--dur-slow) var(--ease-out) both; }
+@keyframes toast-enter { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.toast.leaving { animation: toast-leave var(--dur-base) var(--ease-out) both; }
+@keyframes toast-leave { to { opacity: 0; transform: translateY(6px) scale(.97); } }
+.toast-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.toast-spinner { width: 10px; height: 10px; border: 1.5px solid var(--violet-200); border-top-color: var(--violet-500); border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.toast-info { flex: 1; }
+.toast-label { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.toast-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; font-family: var(--font-mono); }
+.toast-dismiss { font-size: 16px; color: var(--text-tertiary); cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: color var(--dur-fast); border: none; background: none; }
+.toast-dismiss:hover { color: var(--text-primary); }
+
+/* ══════════════════════════════════════════════════════════
+   CONSTITUTION
+   ══════════════════════════════════════════════════════════ */
+.const-article { margin-bottom: 32px; }
+.const-article-title { font-family: var(--font-display); font-size: 17px; font-weight: 400; color: var(--text-primary); margin-bottom: 16px; padding-bottom: 10px; border-bottom: .5px solid var(--border); }
+.const-clause { margin-bottom: 20px; }
+.const-clause-num { font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--text-info); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
+.const-clause-title { font-size: 14px; font-weight: 500; color: var(--text-primary); margin-bottom: 6px; }
+.const-clause-text { font-size: 13px; line-height: 1.7; color: var(--text-secondary); border-left: 2px solid var(--violet-200); padding-left: 12px; }
+
+/* Admin */
+.admin-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 768px) { .admin-grid { grid-template-columns: 1fr 1fr; } }
+.admin-card { background: var(--surface-card); border: .5px solid var(--border); border-radius: 10px; overflow: hidden; }
+.admin-card-header { padding: 12px 16px; border-bottom: .5px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.admin-card-title { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.admin-card-body { padding: 14px 16px; }
+.param-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: .5px solid var(--border); font-size: 13px; }
+.param-row:last-child { border-bottom: none; }
+.param-key { color: var(--text-secondary); }
+.param-val { font-weight: 500; color: var(--text-primary); }
+.multisig-action-card { background: var(--surface); border: .5px solid var(--s-confirm-border); border-radius: 8px; padding: 12px 14px; margin-bottom: 8px; }
+.multisig-action-card:last-child { margin-bottom: 0; }
+
+/* ══════════════════════════════════════════════════════════
+   UTILITIES
+   ══════════════════════════════════════════════════════════ */
+.hidden { display: none !important; }
+.t-label { font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .07em; color: var(--text-tertiary); }
+.t-mono { font-family: var(--font-mono); font-size: 12px; }
+.t-small { font-size: 12px; color: var(--text-secondary); }
+.mt-4{margin-top:4px}.mt-8{margin-top:8px}.mt-12{margin-top:12px}.mt-16{margin-top:16px}
+.mb-4{margin-bottom:4px}.mb-8{margin-bottom:8px}.mb-12{margin-bottom:12px}.mb-16{margin-bottom:16px}
+.connect-prompt { border: .5px dashed var(--border); border-radius: 8px; padding: 14px 16px; text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   GOVERNANCE IDENTITY — constitutional authority signatures
+   ══════════════════════════════════════════════════════════ */
+
+/* Proposal number — treated as a legal docket number */
+.docket {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+/* Ruling line — thin horizontal rule with civic weight */
+.ruling-line {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0;
+  opacity: .6;
+}
+
+/* Seal — the governance process indicator strip */
+.process-strip {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  letter-spacing: .04em;
+  overflow-x: auto;
+  padding: 10px 16px;
+  background: var(--surface-card);
+  border-bottom: .5px solid var(--border);
+  scrollbar-width: none;
+}
+.process-strip::-webkit-scrollbar { display: none; }
+
+.process-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+.process-step.done   { color: var(--s-accepted-text); }
+.process-step.active { color: var(--text-primary); font-weight: 500; background: var(--surface-hover); }
+.process-step.future { opacity: .45; }
+
+.process-arrow {
+  color: var(--text-tertiary);
+  padding: 0 2px;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+/* Constitution quote block — pulls a clause into focus */
+.const-pullquote {
+  border-left: 3px solid var(--violet-400);
+  padding: 10px 16px;
+  margin: 0;
+  background: var(--violet-50);
+  border-radius: 0 7px 7px 0;
+}
+.const-pullquote p {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-style: italic;
+  font-weight: 350;
+  color: var(--text-info);
+  line-height: 1.6;
+  margin: 0;
+}
+.const-pullquote cite {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 6px;
+  font-style: normal;
+}
+
+/* Vote moment — enlarged tally for the detail page */
+.vote-tally-large {
+  display: flex;
+  gap: 20px;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+.vote-tally-large .tally-yes {
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 350;
+  color: var(--s-accepted-text);
+  letter-spacing: -.02em;
+  line-height: 1;
+}
+.vote-tally-large .tally-no {
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 350;
+  color: var(--s-rejected-text);
+  letter-spacing: -.02em;
+  line-height: 1;
+}
+.vote-tally-large .tally-label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-tertiary);
+  margin-left: 3px;
+  align-self: flex-end;
+  padding-bottom: 5px;
+}
+.vote-tally-sep {
+  font-family: var(--font-display);
+  font-size: 28px;
+  color: var(--border);
+  align-self: flex-end;
+  padding-bottom: 4px;
+}
+
+/* Finalization moment — high-stakes CTA */
+.finalize-cta {
+  background: var(--ink-950);
+  border: none;
+  color: #fff;
+  border-radius: 10px;
+  padding: 14px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  width: 100%;
+  letter-spacing: -.01em;
+  transition: opacity var(--dur-fast), transform var(--dur-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.finalize-cta:hover { opacity: .88; transform: translateY(-1px); }
+.finalize-cta:active { transform: scale(.99); }
+
+@media (prefers-color-scheme: dark) {
+  .finalize-cta { background: #fff; color: var(--ink-950); }
+}
+
+/* Dispute stage badge — numbered, weighted */
+.dispute-stage-num {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* About page */
+.about-section { max-width: 680px; margin: 0 auto; padding: 32px 0 48px; }
+.about-lead {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 350;
+  line-height: 1.65;
+  color: var(--text-primary);
+  letter-spacing: -.01em;
+  margin-bottom: 32px;
+}
+.about-h2 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 400;
+  color: var(--text-primary);
+  margin: 28px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: .5px solid var(--border);
+}
+.about-p {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+}
+.about-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 16px 0;
+}
+.about-flow-step {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 12px 0;
+  border-bottom: .5px solid var(--border);
+}
+.about-flow-step:last-child { border-bottom: none; }
+.about-flow-num {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: var(--violet-50);
+  border: .5px solid var(--violet-200);
+  color: var(--violet-600);
+  font-size: 11px;
+  font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.about-flow-title { font-size: 13px; font-weight: 500; color: var(--text-primary); margin-bottom: 3px; }
+.about-flow-desc  { font-size: 12px; color: var(--text-secondary); line-height: 1.55; }
+.about-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 12px 0 20px;
+}
+.about-table th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-tertiary);
+  padding: 8px 12px;
+  border-bottom: .5px solid var(--border);
+}
+.about-table td {
+  padding: 9px 12px;
+  border-bottom: .5px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.about-table td:first-child { font-family: var(--font-mono); font-size: 12px; color: var(--text-info); }
+.about-table tr:last-child td { border-bottom: none; }
+.about-link {
+  color: var(--violet-600);
+  text-decoration: underline;
+  text-decoration-color: var(--violet-200);
+  text-underline-offset: 2px;
+  transition: color var(--dur-fast);
+}
+.about-link:hover { color: var(--violet-700); }
+
+</style>
+</head>
+
+<body>
+<div class="app" id="app">
+
+  <!-- DESKTOP NAV -->
+  <nav class="nav" role="navigation" aria-label="Main navigation">
+    <div class="nav-inner">
+      <div class="nav-logo" onclick="navigate('proposals')" role="button" tabindex="0" aria-label="GovLayer home" onkeydown="if(event.key==='Enter')navigate('proposals')">
+        <div class="nav-logo-mark" aria-hidden="true">G</div>
+        <span class="nav-logo-text">GovLayer</span>
+      </div>
+      <div class="nav-links" role="list">
+        <button class="nav-link active" id="nav-proposals" onclick="navigate('proposals')">Proposals</button>
+        <button class="nav-link" id="nav-constitution" onclick="navigate('constitution')">Constitution</button>
+        <button class="nav-link" id="nav-governance" onclick="navigate('governance')">Governance</button>
+        <button class="nav-link hidden" id="nav-admin" onclick="navigate('admin')">Admin</button>
+        <button class="nav-link" id="nav-about" onclick="navigate('about')">About</button>
+      </div>
+      <div class="nav-right">
+        <span class="eligibility-chip" id="eligibility-chip" aria-label="Eligibility mode"></span>
+        <span class="admin-chip hidden" id="admin-chip" onclick="navigate('admin')">
+          <span style="width:6px;height:6px;border-radius:50%;background:var(--s-confirm-dot)"></span>Admin
+        </span>
+        <button class="wallet-btn" id="wallet-btn" onclick="toggleWallet()">Connect wallet</button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- MOBILE HEADER -->
+  <header class="mobile-header">
+    <div class="mobile-logo">
+      <div class="nav-logo-mark" style="width:22px;height:22px;font-size:11px" aria-hidden="true">G</div>
+      GovLayer
+    </div>
+    <div class="mobile-actions">
+      <span class="admin-chip hidden" id="admin-chip-mobile" onclick="navigate('admin')" style="font-size:10px;padding:3px 8px">Admin</span>
+      <button class="wallet-btn" id="wallet-btn-mobile" onclick="toggleWallet()" style="padding:5px 10px;font-size:11px">Connect</button>
+    </div>
+  </header>
+
+  <!-- PAGE BODY -->
+  <main class="page-body" id="page-body" role="main"></main>
+
+  <!-- MOBILE TAB BAR -->
+  <nav class="tab-bar" role="navigation" aria-label="Mobile navigation">
+    <button class="tab-item active" id="tab-proposals" onclick="navigate('proposals')" aria-label="Proposals">
+      <div class="tab-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12h6M9 8h6M9 16h4M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/></svg></div>
+      Proposals
+    </button>
+    <button class="tab-item" id="tab-constitution" onclick="navigate('constitution')" aria-label="Constitution">
+      <div class="tab-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+      Constitution
+    </button>
+    <button class="tab-item" id="tab-governance" onclick="navigate('governance')" aria-label="Governance">
+      <div class="tab-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+      History
+    </button>
+    <button class="tab-item hidden" id="tab-admin" onclick="navigate('admin')" aria-label="Admin">
+      <div class="tab-icon-wrap">
+        <span class="tab-badge hidden" id="tab-admin-badge">0</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M6 20v-1a6 6 0 0 1 12 0v1"/></svg>
+      </div>
+      Admin
+    </button>
+    <button class="tab-item" id="tab-about" onclick="navigate('about')" aria-label="About GovLayer">
+      <div class="tab-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+      About
+    </button>
+  </nav>
+
+  <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="false"></div>
+</div>
+
+<!-- genlayer-js SDK — loaded as ESM module, stored on window for access by main script -->
+<script type="module">
+  import { createClient, createAccount } from 'https://esm.sh/genlayer-js@1.1.8';
+  import { TransactionStatus } from 'https://esm.sh/genlayer-js@1.1.8/types';
+  window._GL = { createClient, createAccount, TransactionStatus };
+  // Signal that SDK is ready
+  window.dispatchEvent(new Event('gl-sdk-ready'));
+</script>
+
+<script>
+'use strict';
+
+/* ══════════════════════════════════════════════════════════
+   CONFIG — Live GenLayer Studionet
+   ══════════════════════════════════════════════════════════ */
+const CONFIG = {
+  CONTRACT_ADDRESS: '0xAD5ecc8A49EaaA6D71A9a820b12D359c2D0597fb',
+  RPC_URL:          'https://studio.genlayer.com/api',
+  CHAIN_ID:         61999,
+  NETWORK_NAME:     'GenLayer Studionet',
+  POLL_PROPOSALS:   30_000,
+  POLL_DETAIL:      15_000,
+  POLL_ADMIN:       20_000,
+};
+
+/* ══════════════════════════════════════════════════════════
+   STATE
+   ══════════════════════════════════════════════════════════ */
+const state = {
+  page:            'proposals',
+  proposals:       [],
+  config:          null,
+  admins:          [],
+  whitelist:       {},
+  history:         [],
+  pendingActions:  [],
+  constitution:    '',
+  wallet:          null,    // hex address string
+  account:         null,    // genlayer-js account object for writeContract
+  isAdmin:         false,
+  currentProposal: null,
+  detailId:        null,
+  loading:         { proposals: true, detail: false, config: true },
+  totalProposals:  0,
+  historyCount:    0,
+  filters:         { proposals: 'active' },
+  createForm:      { title:'', description:'', type:'standard', duration:86400, proposed_constitution:'' },
+  userVotes:       {},
+  networkOk:       null,
+  toastCounter:    0,
+  pollingTimers:   {},
+  historyPage:     { offset: 1, limit: 20 },
+  proposalPage:    { offset: 1, limit: 20 },
+};
+
+/* ══════════════════════════════════════════════════════════
+   UTILITIES
+   ══════════════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+
+function formatAddress(addr) {
+  if (!addr || addr.length < 12) return addr || '—';
+  return `${addr.slice(0,6)}…${addr.slice(-4)}`;
+}
+
+function formatTimestamp(unix) {
+  if (!unix || unix === 0) return '—';
+  const d = new Date(unix * 1000);
+  const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const h = String(d.getUTCHours()).padStart(2,'0');
+  const min = String(d.getUTCMinutes()).padStart(2,'0');
+  return `${m[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()} · ${h}:${min} UTC`;
+}
+
+function formatCountdown(unix) {
+  if (!unix) return '—';
+  const diff = unix - Math.floor(Date.now()/1000);
+  if (diff <= 0) return 'Closed';
+  if (diff < 60) return `${diff}s`;
+  if (diff < 3600) return `${Math.floor(diff/60)}m`;
+  if (diff < 86400) { const h=Math.floor(diff/3600),m=Math.floor((diff%3600)/60); return m>0?`${h}h ${m}m`:`${h}h`; }
+  const d=Math.floor(diff/86400),h=Math.floor((diff%86400)/3600);
+  return h>0?`${d}d ${h}h`:`${d}d`;
+}
+
+function formatSeconds(s) {
+  s = Number(s)||0;
+  if (s < 3600) return `${Math.floor(s/60)}m`;
+  if (s < 86400) return `${Math.floor(s/3600)}h`;
+  return `${Math.floor(s/86400)}d`;
+}
+
+function isVotingClosed(votingEnd) { return Math.floor(Date.now()/1000) > (Number(votingEnd)||0); }
+function isUrgent(unix) { return unix - Math.floor(Date.now()/1000) < 60; }
+
+/* ══════════════════════════════════════════════════════════
+   ERROR MAP
+   ══════════════════════════════════════════════════════════ */
+const ERROR_MAP = {
+  'Voting period has closed':         'Voting has closed. Click "Close voting" to record the outcome.',
+  'Voting period has not yet closed': 'Voting is still open — wait for the window to close.',
+  'Already voted on this proposal':   'You already voted on this proposal.',
+  'Voting is not open':               'This proposal is not currently accepting votes.',
+  'Title cannot be empty':            'Please add a title to your proposal.',
+  'Description cannot be empty':      'Please write a description.',
+  'voting_duration cannot be zero':   'Please choose a voting duration.',
+  'Only the original proposer can cancel': 'Only the original proposer can cancel this.',
+  'Maximum resubmissions':            'All revisions used. Submit a new proposal instead.',
+  'The voting window has expired':    'Voting window closed. Submit a new proposal.',
+  'Only admins':                      'Your wallet does not have admin privileges.',
+  'Cannot add the zero address':      'Please enter a valid wallet address.',
+  'Address is already an active admin': 'This address is already an admin.',
+  'Admin limit reached':              'Admin limit reached. Remove one before adding.',
+  'Cannot remove the last admin':     'At least one admin must remain.',
+  'Maximum dispute stages':           'Maximum dispute stages reached for this proposal.',
+  'Dispute cooldown active':          'Cooldown active. Wait before raising another dispute.',
+  'Disputes can only be raised on finalized': 'Disputes can only be raised after finalization.',
+  'Cannot approve your own':          'A different admin must approve — you proposed this.',
+  'Action has expired':               'Action expired. Propose it again.',
+  'Proposal is not awaiting constitution confirmation': 'This constitution update has already been applied or is not yet ready.',
+  'Unable to read transaction timestamp': 'Network time error. Please retry.',
+  'Target is not an active admin':    'That address is not an active admin.',
+};
+
+function mapError(raw) {
+  if (!raw) return 'An unexpected error occurred.';
+  for (const [key, msg] of Object.entries(ERROR_MAP)) {
+    if (raw.includes(key)) return msg;
+  }
+  return raw.length > 140 ? raw.slice(0,140)+'…' : raw;
+}
+
+/* ══════════════════════════════════════════════════════════
+   GENLAYER-JS SDK CLIENT
+   SDK loaded via ESM module above, stored on window._GL.
+   API confirmed from working reference implementation:
+     readContract  → { address, functionName, args }
+     writeContract → { account, address, functionName, args, value: 0n }
+     waitForTransactionReceipt → { hash, status: TransactionStatus.ACCEPTED }
+   Transactions on Studionet typically take 1–4 minutes.
+   Retry loop: 60 attempts × 5s = up to 5 minutes.
+   ══════════════════════════════════════════════════════════ */
+
+let _glClient = null;
+let _sdkReady = false;
+
+// Wait for the ESM module to finish loading
+window.addEventListener('gl-sdk-ready', () => { _sdkReady = true; });
+
+function getSDK() {
+  if (!window._GL) throw new Error('GenLayer SDK not loaded. Please refresh the page.');
+  return window._GL;
+}
+
+function getClient() {
+  if (_glClient) return _glClient;
+  const { createClient } = getSDK();
+  _glClient = createClient({ endpoint: CONFIG.RPC_URL });
+  return _glClient;
+}
+
+async function readContract(fn, args = []) {
+  const client = getClient();
+  let retries = 3;
+  while (retries > 0) {
+    try {
+      const result = await client.readContract({
+        address:      CONFIG.CONTRACT_ADDRESS,
+        functionName: fn,
+        args:         args,
+      });
+      return result;
+    } catch (err) {
+      const retryable = err.message && (
+        err.message.includes('fetch') ||
+        err.message.includes('network') ||
+        err.message.includes('timeout') ||
+        err.message.includes('Failed to fetch')
+      );
+      if (retryable && retries > 1) {
+        await new Promise(r => setTimeout(r, 2000));
+        retries--;
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
+async function writeContract(fn, args = []) {
+  if (!state.wallet) throw new Error('Wallet not connected');
+  if (!state.account)  throw new Error('Account not initialised');
+  const client = getClient();
+  const { TransactionStatus } = getSDK();
+
+  // Submit the transaction
+  const hash = await client.writeContract({
+    account:      state.account,
+    address:      CONFIG.CONTRACT_ADDRESS,
+    functionName: fn,
+    args:         args,
+    value:        0n,
+  });
+
+  // Brief pause so the RPC indexes the tx
+  await new Promise(r => setTimeout(r, 2000));
+
+  // Poll for receipt — 60 retries × 5s = up to 5 minutes
+  let retries = 60;
+  while (retries > 0) {
+    try {
+      const receipt = await client.waitForTransactionReceipt({
+        hash,
+        status: TransactionStatus.ACCEPTED,
+      });
+      if (receipt) return receipt;
+    } catch (err) {
+      const retryable = err.message && (
+        err.message.includes('not found') ||
+        err.message.includes('fetch') ||
+        err.message.includes('network') ||
+        err.message.includes('timeout') ||
+        err.message.includes('unknown') ||
+        err.message.includes('failed')
+      );
+      if (retryable && retries > 1) {
+        const delay = err.message.includes('fetch') ? 5000 : 3000;
+        await new Promise(r => setTimeout(r, delay));
+        retries--;
+      } else {
+        throw err;
+      }
+    }
+    retries--;
+    await new Promise(r => setTimeout(r, 5000));
+  }
+  throw new Error('Transaction timed out after 5 minutes. Check governance history for the outcome.');
+}
+
+/* ══════════════════════════════════════════════════════════
+   NETWORK CHECK
+   ══════════════════════════════════════════════════════════ */
+async function checkNetwork() {
+  try {
+    const cfg = await readContract('get_config');
+    state.networkOk = true;
+    return cfg;
+  } catch (e) {
+    state.networkOk = false;
+    return null;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   LIVE DATA LOADING
+   ══════════════════════════════════════════════════════════ */
+async function loadConfig() {
+  try {
+    const cfg = await readContract('get_config');
+    if (cfg) state.config = cfg;
+  } catch (e) {
+    console.warn('loadConfig:', e.message);
+  }
+}
+
+async function loadAdmins() {
+  try {
+    const admins = await readContract('get_admins');
+    if (Array.isArray(admins)) state.admins = admins;
+  } catch (e) {
+    console.warn('loadAdmins:', e.message);
+  }
+}
+
+async function loadConstitution() {
+  try {
+    const text = await readContract('get_constitution');
+    if (text) state.constitution = text;
+  } catch (e) {
+    console.warn('loadConstitution:', e.message);
+  }
+}
+
+async function loadProposals(offset = 1, limit = 20) {
+  state.loading.proposals = true;
+  try {
+    const list = await readContract('list_proposals', [offset, limit]);
+    if (Array.isArray(list)) {
+      state.proposals = list;
+      state.totalProposals = state.config ? Number(state.config.proposal_count) : list.length;
+    }
+  } catch (e) {
+    console.warn('loadProposals:', e.message);
+  } finally {
+    state.loading.proposals = false;
+  }
+}
+
+async function loadProposal(id) {
+  state.loading.detail = true;
+  try {
+    const p = await readContract('get_proposal', [Number(id)]);
+    if (p && p.id) {
+      state.currentProposal = p;
+      // Update in list too
+      const idx = state.proposals.findIndex(x => x.id == id);
+      if (idx >= 0) state.proposals[idx] = p;
+      else state.proposals.unshift(p);
+    }
+  } catch (e) {
+    console.warn('loadProposal:', e.message);
+  } finally {
+    state.loading.detail = false;
+  }
+}
+
+async function loadHistory(offset = 0, limit = 20) {
+  try {
+    const hist = await readContract('get_governance_history', [offset, limit]);
+    if (Array.isArray(hist)) state.history = hist;
+  } catch (e) {
+    console.warn('loadHistory:', e.message);
+  }
+}
+
+async function loadPendingActions() {
+  try {
+    const actions = await readContract('get_pending_actions');
+    if (Array.isArray(actions)) state.pendingActions = actions;
+  } catch (e) {
+    console.warn('loadPendingActions:', e.message);
+  }
+}
+
+async function loadWhitelist() {
+  try {
+    const wl = await readContract('get_whitelist');
+    if (wl && typeof wl === 'object') state.whitelist = wl;
+  } catch (e) {
+    console.warn('loadWhitelist:', e.message);
+  }
+}
+
+async function initData() {
+  // Show skeleton while loading
+  render();
+  // Check network first
+  const cfg = await checkNetwork();
+  if (!cfg) {
+    state.networkOk = false;
+    state.loading.proposals = false;
+    state.loading.config = false;
+    render();
+    return;
+  }
+  state.config = cfg;
+  state.loading.config = false;
+
+  // Parallel load
+  await Promise.all([
+    loadAdmins(),
+    loadConstitution(),
+    loadProposals(),
+    loadHistory(),
+  ]);
+
+  if (state.isAdmin) {
+    await Promise.all([loadPendingActions(), loadWhitelist()]);
+  }
+
+  updateWalletUI();
+  render();
+  startPolling();
+}
+
+/* ══════════════════════════════════════════════════════════
+   POLLING
+   ══════════════════════════════════════════════════════════ */
+function startPolling() {
+  clearAllPolling();
+
+  state.pollingTimers.proposals = setInterval(async () => {
+    if (state.page === 'proposals') {
+      await loadProposals();
+      render();
+    }
+  }, CONFIG.POLL_PROPOSALS);
+
+  state.pollingTimers.detail = setInterval(async () => {
+    if (state.page === 'detail' && state.detailId) {
+      await loadProposal(state.detailId);
+      render();
+    }
+  }, CONFIG.POLL_DETAIL);
+
+  state.pollingTimers.admin = setInterval(async () => {
+    if (state.isAdmin) {
+      await loadPendingActions();
+      if (state.page === 'admin') render();
+    }
+  }, CONFIG.POLL_ADMIN);
+}
+
+function clearAllPolling() {
+  Object.values(state.pollingTimers).forEach(clearInterval);
+  state.pollingTimers = {};
+}
+
+/* ══════════════════════════════════════════════════════════
+   WALLET
+   ══════════════════════════════════════════════════════════ */
+async function toggleWallet() {
+  if (state.wallet) { disconnectWallet(); return; }
+  await connectWallet();
+}
+
+async function connectWallet() {
+  if (typeof window.ethereum === 'undefined') {
+    showToast('No wallet detected', 'Install MetaMask to interact with GovLayer', 'error', 6000);
+    return;
+  }
+  try {
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    if (!accounts || accounts.length === 0) {
+      showToast('No accounts', 'Allow wallet access and try again', 'error', 4000);
+      return;
+    }
+    state.wallet  = accounts[0].toLowerCase();
+    // genlayer-js account object — isExternal:true means MetaMask signs the tx
+    state.account = { address: state.wallet, isExternal: true };
+
+    // Switch / add network
+    try {
+      const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
+      if (parseInt(chainIdHex, 16) !== CONFIG.CHAIN_ID) {
+        try {
+          await window.ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: '0x' + CONFIG.CHAIN_ID.toString(16) }],
+          });
+        } catch (sw) {
+          if (sw.code === 4902) {
+            await window.ethereum.request({
+              method: 'wallet_addEthereumChain',
+              params: [{
+                chainId: '0x' + CONFIG.CHAIN_ID.toString(16),
+                chainName: CONFIG.NETWORK_NAME,
+                rpcUrls: [CONFIG.RPC_URL],
+                nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
+              }],
+            }).catch(() => {
+              showToast('Add network manually', `${CONFIG.NETWORK_NAME} · Chain ID ${CONFIG.CHAIN_ID}`, 'error', 7000);
+            });
+          }
+        }
+      }
+    } catch (_) { /* chain check non-fatal */ }
+
+    // React to wallet changes
+    window.ethereum.removeAllListeners && window.ethereum.removeAllListeners('accountsChanged');
+    window.ethereum.removeAllListeners && window.ethereum.removeAllListeners('chainChanged');
+    window.ethereum.on('accountsChanged', accs => {
+      if (!accs.length) { disconnectWallet(); return; }
+      state.wallet  = accs[0].toLowerCase();
+      state.account = { address: state.wallet, isExternal: true };
+      afterWalletConnect();
+    });
+    window.ethereum.on('chainChanged', () => window.location.reload());
+
+    await afterWalletConnect();
+    showToast('Wallet connected', formatAddress(state.wallet), 'success', 3000);
+  } catch (e) {
+    if (e.code === 4001) showToast('Connection rejected', 'You cancelled the wallet request', 'error', 4000);
+    else showToast('Connection failed', e.message, 'error', 5000);
+  }
+}
+
+async function afterWalletConnect() {
+  state.isAdmin = state.admins.some(a => a.toLowerCase() === state.wallet);
+  if (state.isAdmin) await Promise.all([loadPendingActions(), loadWhitelist()]);
+  updateWalletUI();
+  render();
+}
+
+function disconnectWallet() {
+  state.wallet  = null;
+  state.account = null;
+  state.isAdmin = false;
+  updateWalletUI();
+  render();
+  showToast('Wallet disconnected', '', 'info', 2000);
+}
+
+function updateWalletUI() {
+  [$('wallet-btn'), $('wallet-btn-mobile')].forEach(btn => {
+    if (!btn) return;
+    if (state.wallet) {
+      btn.textContent = formatAddress(state.wallet);
+      btn.classList.add('connected');
+    } else {
+      btn.textContent = btn.id === 'wallet-btn' ? 'Connect wallet' : 'Connect';
+      btn.classList.remove('connected');
+    }
+  });
+
+  const pendingCount = state.pendingActions.filter(a => a.status === 'pending').length;
+
+  ['admin-chip','admin-chip-mobile'].forEach(id => {
+    const el = $(id); if (!el) return;
+    if (state.isAdmin) {
+      el.classList.remove('hidden');
+      el.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:var(--s-confirm-dot)"></span>Admin${pendingCount > 0 ? ` · ${pendingCount}` : ''}`;
+    } else el.classList.add('hidden');
+  });
+
+  ['nav-admin','tab-admin'].forEach(id => {
+    const el = $(id); if (!el) return;
+    state.isAdmin ? el.classList.remove('hidden') : el.classList.add('hidden');
+  });
+
+  const badge = $('tab-admin-badge');
+  if (badge) {
+    if (pendingCount > 0) { badge.classList.remove('hidden'); badge.textContent = pendingCount; }
+    else badge.classList.add('hidden');
+  }
+
+  const chip = $('eligibility-chip');
+  if (chip && state.config) {
+    const mode = state.config.eligibility_mode;
+    const labels = { open:'Open governance', erc20:'Token gated', nft:'NFT gated', custom:'Custom eligibility' };
+    const styles = {
+      open:   'background:var(--s-accepted-bg);color:var(--s-accepted-text);border-color:var(--s-accepted-border)',
+      erc20:  'background:var(--s-pending-bg);color:var(--s-pending-text);border-color:var(--s-pending-border)',
+      nft:    'background:var(--s-review-bg);color:var(--s-review-text);border-color:var(--s-review-border)',
+      custom: 'background:var(--surface-card);color:var(--text-secondary);border-color:var(--border)',
+    };
+    chip.textContent = labels[mode] || mode;
+    chip.style.cssText = styles[mode] || '';
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   NAVIGATION
+   ══════════════════════════════════════════════════════════ */
+function navigate(page, id) {
+  state.page = page;
+  if (id !== undefined) { state.detailId = id; state.currentProposal = null; }
+
+  ['proposals','constitution','governance','admin','about'].forEach(p => {
+    const nav = $(`nav-${p}`), tab = $(`tab-${p}`);
+    if (nav) nav.classList.toggle('active', p === page);
+    if (tab) tab.classList.toggle('active', p === page);
+  });
+
+  // Load detail data on navigation
+  if (page === 'detail' && id !== undefined) {
+    loadProposal(id).then(() => render());
+  }
+
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/* ══════════════════════════════════════════════════════════
+   TOAST
+   ══════════════════════════════════════════════════════════ */
+function showToast(label, sub, type = 'info', duration = 5000) {
+  const id = ++state.toastCounter;
+  const container = $('toast-container');
+  const dotColors = { info:'background:var(--violet-400)', success:'background:var(--s-accepted-dot)', error:'background:var(--s-rejected-dot)' };
+  const indicator = type === 'pending'
+    ? `<div class="toast-spinner" aria-hidden="true"></div>`
+    : `<div class="toast-dot" style="${dotColors[type]||dotColors.info}" aria-hidden="true"></div>`;
+  const el = document.createElement('div');
+  el.className = 'toast'; el.id = `toast-${id}`; el.setAttribute('role','status');
+  el.innerHTML = `${indicator}<div class="toast-info"><div class="toast-label">${esc(label)}</div>${sub?`<div class="toast-sub">${esc(sub)}</div>`:''}</div><button class="toast-dismiss" onclick="dismissToast(${id})" aria-label="Dismiss">×</button>`;
+  container.appendChild(el);
+  if (duration > 0) setTimeout(() => dismissToast(id), duration);
+  return id;
+}
+
+function dismissToast(id) {
+  const el = $(`toast-${id}`); if (!el) return;
+  el.classList.add('leaving');
+  setTimeout(() => el.remove(), 200);
+}
+
+/* ══════════════════════════════════════════════════════════
+   HTML HELPERS
+   ══════════════════════════════════════════════════════════ */
+const STATUS_LABELS = {
+  pending:'Voting open', needs_revision:'Needs revision', accepted:'Accepted',
+  rejected:'Rejected', under_review:'Under review',
+  pending_constitution_confirm:'Awaiting admin', cancelled:'Cancelled',
+};
+
+function badgeHtml(status) {
+  const label = STATUS_LABELS[status] || status;
+  return `<span class="badge ${esc(status)}" role="status" aria-label="${label}"><span class="badge-dot" aria-hidden="true"></span>${label}</span>`;
+}
+
+function aiChipHtml(decision) {
+  const c = {accept:'var(--s-accepted-dot)',revise:'var(--s-revision-dot)',reject:'var(--s-rejected-dot)'}[decision]||'var(--text-tertiary)';
+  const l = {accept:'AI accepted',revise:'AI: revise',reject:'AI rejected'}[decision]||decision;
+  return `<span class="ai-chip"><span class="ai-dot" style="background:${c}" aria-hidden="true"></span>${l}</span>`;
+}
+
+function timerHtml(votingEnd, p) {
+  if (isVotingClosed(votingEnd)) {
+    if (p && p.status === 'pending') return `<span class="timer finalize-ready">Ready to finalize</span>`;
+    return `<span class="timer closed">Closed</span>`;
+  }
+  const cd = formatCountdown(votingEnd), urgent = isUrgent(votingEnd);
+  return `<span class="timer${urgent?' urgent':''}">⏱ ${cd}</span>`;
+}
+
+function voteBarHtml(p, mini = false) {
+  const total = Number(p.votes_yes||0) + Number(p.votes_no||0);
+  const yesP = total > 0 ? Math.round((Number(p.votes_yes)/total)*100) : 0;
+  const noP  = total > 0 ? Math.round((Number(p.votes_no)/total)*100)  : 0;
+  const thr  = Number(state.config?.approval_threshold_percent||60);
+  const qm   = Number(state.config?.min_quorum||10);
+
+  if (mini) return `<div class="mini-bar-wrap" role="img" aria-label="${yesP}% for, ${noP}% against"><div class="mini-bar-yes" style="width:${yesP}%"></div><div class="mini-bar-no" style="width:${noP}%"></div></div>`;
+
+  const passing = total >= qm && yesP >= thr && p.ai_audit_decision === 'accept';
+  return `<div>
+    <div class="vote-tally-large">
+      <div><div class="tally-yes">${yr}<span class="tally-label">for</span></div></div>
+      <div class="vote-tally-sep">·</div>
+      <div><div class="tally-no">${nr}<span class="tally-label">against</span></div></div>
+      <div style="margin-left:auto;font-size:12px;color:var(--text-tertiary);align-self:flex-end;padding-bottom:5px">${total} vote${total!==1?'s':''} cast</div>
+    </div>
+    <div class="vote-track" role="img" aria-label="Vote tally: ${yesP}% for, ${noP}% against">
+      <div class="vote-yes" style="width:${yesP}%"></div>
+      <div class="vote-no" style="width:${noP}%"></div>
+      <div class="quorum-tick" style="left:${thr}%" title="${thr}% threshold"></div>
+    </div>
+    <div class="quorum-info mt-8">
+      <span class="quorum-marker"></span>
+      Threshold: ${thr}% · Quorum: ${qm} votes${passing?' · <strong style="color:var(--s-accepted-text)">Currently passing ✓</strong>':''}
+    </div>
+  </div>`;
+}
+
+function auditPanelHtml(p) {
+  const vc = {accept:'verdict-accept',revise:'verdict-revise',reject:'verdict-reject'}[p.ai_audit_decision]||'verdict-accept';
+  const vl = {accept:'Accepted',revise:'Needs revision',reject:'Rejected'}[p.ai_audit_decision]||p.ai_audit_decision;
+  const isUpdate = p.proposal_type === 'constitution_update';
+  const conflicts = Array.isArray(p.constitutional_conflicts) ? p.constitutional_conflicts : [];
+
+  return `<div class="audit-panel">
+    <div class="audit-header">
+      <div class="audit-icon" aria-hidden="true">AI</div>
+      <div style="flex:1"><div class="audit-source-title">Constitutional ${isUpdate?'amendment ':'AI '}review</div><div class="audit-source-sub">Evaluated against constitution snapshot at submission</div></div>
+      <span class="verdict-chip ${vc}" role="status">${vl}</span>
+    </div>
+    <div class="audit-body">
+      <div class="audit-reasoning">${esc(p.ai_audit_reasoning)}</div>
+      ${conflicts.length > 0
+        ? `<div class="t-label mb-8">Constitutional conflicts</div><div class="conflict-list">${conflicts.map(c=>`<div class="conflict-item"><div class="conflict-clause">${esc(c.clause)}</div><div class="conflict-text">${esc(c.violation)}</div></div>`).join('')}</div>`
+        : `<div style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-tertiary)"><span style="width:8px;height:8px;border-radius:50%;background:var(--s-accepted-dot);display:inline-block"></span>No constitutional conflicts identified</div>`
+      }
+    </div>
+  </div>`;
+}
+
+function constitutionDiffHtml(current, proposed) {
+  if (!current || !proposed) return '';
+  const cl = current.split('\n').slice(0,60), pl = proposed.split('\n').slice(0,60);
+  let html = '', changes = 0;
+  const max = Math.max(cl.length, pl.length);
+  for (let i = 0; i < Math.min(max, 40); i++) {
+    const c = cl[i]||'', p = pl[i]||'';
+    if (c !== p) {
+      changes++;
+      if (c) html += `<div class="diff-line diff-removed"><span class="diff-marker">−</span>${esc(c)}</div>`;
+      if (p) html += `<div class="diff-line diff-added"><span class="diff-marker">+</span>${esc(p)}</div>`;
+    } else if (c.trim()) {
+      html += `<div class="diff-line diff-same"><span class="diff-marker"> </span>${esc(c)}</div>`;
+    }
+  }
+  return `<div class="diff-wrap"><div class="diff-header"><span>Proposed constitutional changes</span><span style="color:var(--s-accepted-text)">${changes} change${changes!==1?'s':''}</span></div>${html}</div>`;
+}
+
+function disputeTimelineHtml(history) {
+  if (!history || history.length === 0) return `<div style="font-size:13px;color:var(--text-tertiary);text-align:center;padding:12px 0">No disputes yet.</div>`;
+  return `<div class="dispute-timeline">${history.map((h,i)=>{
+    const last = i === history.length-1;
+    const dot = (h.resolution||'').toLowerCase().includes('accept')?'var(--s-accepted-dot)':'var(--s-rejected-dot)';
+    return `<div class="dispute-stage"><div class="stage-line-col"><div class="stage-num" style="background:${dot}">${h.stage||i+1}</div>${!last?'<div class="stage-connector"></div>':''}</div><div class="stage-content"><div class="stage-label">Stage ${h.stage||i+1}</div><div class="stage-reason">${esc(h.reason)}</div><div class="stage-resolution">${esc(h.resolution)}</div><div class="stage-ts">${formatTimestamp(h.timestamp)}</div></div></div>`;
+  }).join('')}</div>`;
+}
+
+function networkBannerHtml() {
+  if (state.networkOk === false) {
+    return `<div class="network-banner" role="alert">
+      <span>⚠</span>
+      <div>
+        <strong>Cannot reach ${CONFIG.NETWORK_NAME}</strong> — showing cached data.
+        Contract: <span style="font-family:var(--font-mono);font-size:11px">${formatAddress(CONFIG.CONTRACT_ADDRESS)}</span>
+        <button onclick="initData()" style="margin-left:8px;font-size:11px;color:var(--s-review-text);background:none;border:none;cursor:pointer;text-decoration:underline">Retry</button>
+      </div>
+    </div>`;
+  }
+  return '';
+}
+
+/* ══════════════════════════════════════════════════════════
+   ACTION SIDEBAR
+   ══════════════════════════════════════════════════════════ */
+function actionSidebarHtml(p) {
+  let actionsHtml = '';
+  const cfg = state.config || {};
+  const closed = isVotingClosed(p.voting_end);
+  const voted = state.userVotes[p.id];
+  const myAddr = (state.wallet||'').toLowerCase();
+  const isProposer = (p.proposer||'').toLowerCase() === myAddr;
+
+  if (p.status === 'pending') {
+    if (!closed) {
+      if (!state.wallet) {
+        actionsHtml = `<div class="connect-prompt mt-8"><div class="t-small mb-8">Connect wallet to vote</div><button class="btn-primary full-w" onclick="connectWallet()">Connect wallet</button></div>`;
+      } else if (voted !== undefined) {
+        actionsHtml = `<div class="already-voted-msg mt-8"><span class="voted-dot" style="background:${voted?'var(--s-accepted-dot)':'var(--s-rejected-dot)'}"></span>You voted <strong>${voted?'for':'against'}</strong> this proposal</div>`;
+      } else {
+        actionsHtml = `<div class="vote-buttons mt-8"><button class="btn-vote-for" onclick="handleVote(${p.id},true)">Vote for</button><button class="btn-vote-against" onclick="handleVote(${p.id},false)">Vote against</button></div>`;
+      }
+      if (isProposer) actionsHtml += `<button class="btn-danger full-w mt-8" onclick="handleCancel(${p.id})">Cancel proposal</button>`;
+    } else {
+      actionsHtml = `<button class="finalize-cta mt-8" onclick="handleFinalize(${p.id})"><span>⚖</span> Close voting &amp; record outcome</button><div class="form-note mt-8">Anyone can close the vote</div>`;
+    }
+  }
+
+  if (p.status === 'needs_revision' && isProposer) {
+    const remaining = Number(cfg.max_resubmissions||3) - Number(p.resubmit_count||0);
+    actionsHtml = `<button class="btn-primary full-w mt-8" onclick="navigate('resubmit',${p.id})">Revise and resubmit</button><div class="form-note">${remaining} revision${remaining!==1?'s':''} remaining</div>`;
+  }
+
+  if (['rejected','accepted'].includes(p.status)) {
+    const maxStages = Number(cfg.max_dispute_stages||3);
+    const cooldown  = Number(cfg.dispute_cooldown_seconds||3600);
+    const count     = Number(p.dispute_count||0);
+    if (count < maxStages && state.wallet) {
+      const lastAt = Number(p.last_dispute_at||0);
+      const elapsed = Math.floor(Date.now()/1000) - lastAt;
+      if (lastAt === 0 || elapsed >= cooldown) {
+        actionsHtml += `<button class="btn-secondary full-w mt-8" onclick="navigate('dispute-form',${p.id})">Raise a dispute</button>`;
+      } else {
+        const unlockAt = lastAt + cooldown;
+        actionsHtml += `<div class="mt-8"><span class="timer cooldown">Next dispute in ${formatCountdown(unlockAt)}</span></div>`;
+      }
+    }
+  }
+
+  if (p.status === 'pending_constitution_confirm' && state.isAdmin) {
+    actionsHtml = `<div style="background:var(--s-confirm-bg);border:.5px solid var(--s-confirm-border);border-radius:8px;padding:12px 14px;margin-top:8px;font-size:13px;color:var(--s-confirm-text);line-height:1.5">Vote passed. Confirm to apply constitutional amendment.</div><button class="btn-primary full-w mt-8" onclick="handleConfirmConstitution(${p.id})" style="background:var(--s-confirm-dot)">Confirm &amp; apply amendment</button>`;
+  }
+
+  const yr = Number(p.votes_yes||0), nr = Number(p.votes_no||0), tr = yr+nr;
+  const yp = tr>0?Math.round((yr/tr)*100):0;
+
+  return `<div class="sidebar-card">
+    <div class="sidebar-section">
+      <div class="t-label mb-8">Proposal details</div>
+      <div>
+        <div class="param-row"><span class="param-key">Status</span>${badgeHtml(p.status)}</div>
+        <div class="param-row"><span class="param-key">Type</span><span class="param-val">${p.proposal_type==='constitution_update'?'Constitution update':'Standard'}</span></div>
+        <div class="param-row"><span class="param-key">Proposer</span><span class="t-mono" style="color:var(--text-secondary)">${formatAddress(p.proposer)}</span></div>
+        <div class="param-row"><span class="param-key">Submitted</span><span style="font-size:12px;color:var(--text-secondary)">${formatTimestamp(Number(p.submitted_at))}</span></div>
+        ${p.status==='pending'?`<div class="param-row"><span class="param-key">Closes</span><span style="font-size:12px;color:var(--s-pending-text);font-weight:500">${formatTimestamp(Number(p.voting_end))}</span></div>`:''}
+        <div class="param-row"><span class="param-key">AI verdict</span><span class="param-val" style="color:${p.ai_audit_decision==='accept'?'var(--s-accepted-text)':p.ai_audit_decision==='reject'?'var(--s-rejected-text)':'var(--s-revision-text)'}">${{accept:'Accepted',revise:'Revise',reject:'Rejected'}[p.ai_audit_decision]||p.ai_audit_decision}</span></div>
+        ${Number(p.resubmit_count||0)>0?`<div class="param-row"><span class="param-key">Revisions</span><span class="param-val">${p.resubmit_count} of ${state.config?.max_resubmissions||3} used</span></div>`:''}
+      </div>
+      ${actionsHtml}
+    </div>
+  </div>
+  ${Number(p.dispute_count||0)>0||p.status==='under_review'?`<div class="sidebar-card mt-0"><div class="sidebar-section"><div class="t-label mb-12">Disputes (${p.dispute_count||0} stage${Number(p.dispute_count||0)!==1?'s':''})</div>${disputeTimelineHtml(p.dispute_history)}</div></div>`:''}`;
+}
+
+/* ══════════════════════════════════════════════════════════
+   WRITE HANDLERS — connected to live contract
+   ══════════════════════════════════════════════════════════ */
+async function handleVote(proposalId, support) {
+  if (!state.wallet) { showToast('Wallet not connected','','error',3000); return; }
+  const tid = showToast('Submitting vote…','GenLayer transactions take 1–4 minutes to confirm','pending',0);
+  try {
+    await writeContract('vote', [Number(proposalId), support]);
+    state.userVotes[proposalId] = support;
+    dismissToast(tid);
+    showToast(`Vote recorded`,`You voted ${support?'for':'against'} proposal #${proposalId}`,'success',4000);
+    await loadProposal(proposalId);
+    render();
+  } catch (e) {
+    dismissToast(tid);
+    showToast('Vote failed', mapError(e.message),'error',6000);
+  }
+}
+
+async function handleFinalize(proposalId) {
+  const tid = showToast('Finalizing…','Recording outcome — this may take 1–4 minutes','pending',0);
+  try {
+    await writeContract('finalize_decision', [Number(proposalId)]);
+    dismissToast(tid);
+    showToast('Outcome recorded',`Proposal #${proposalId} finalized`,'success',4000);
+    await loadProposal(proposalId);
+    render();
+  } catch (e) {
+    dismissToast(tid);
+    showToast('Finalization failed', mapError(e.message),'error',6000);
+  }
+}
+
+async function handleCancel(proposalId) {
+  if (!confirm('Cancel this proposal? This cannot be undone.')) return;
+  const tid = showToast('Cancelling…','Waiting for confirmation (1–4 min)','pending',0);
+  try {
+    await writeContract('cancel_proposal', [Number(proposalId)]);
+    dismissToast(tid);
+    showToast('Proposal cancelled',`Proposal #${proposalId} has been cancelled`,'success',4000);
+    await loadProposals();
+    navigate('proposals');
+  } catch (e) {
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message),'error',6000);
+  }
+}
+
+async function handleConfirmConstitution(proposalId) {
+  if (!confirm('Apply this constitutional amendment? This will update the governing constitution.')) return;
+  const tid = showToast('Confirming amendment…','Applying to chain — this may take 1–4 minutes','pending',0);
+  try {
+    await writeContract('confirm_constitution_update', [Number(proposalId)]);
+    dismissToast(tid);
+    showToast('Constitution updated','The new constitution has been applied','success',5000);
+    await Promise.all([loadConstitution(), loadProposal(proposalId)]);
+    render();
+  } catch (e) {
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message),'error',6000);
+  }
+}
+
+async function handleApproveAction(actionId) {
+  const tid = showToast('Approving…','Executing multisig action (1–4 min)','pending',0);
+  try {
+    await writeContract('approve_admin_action', [String(actionId)]);
+    dismissToast(tid);
+    showToast('Action executed',`Multisig action #${actionId} approved`,'success',4000);
+    await Promise.all([loadPendingActions(), loadAdmins()]);
+    updateWalletUI();
+    render();
+  } catch (e) {
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message),'error',6000);
+  }
+}
+
+async function handleSubmitDispute(proposalId, reason) {
+  if (!reason || !reason.trim()) { showToast('Reason required','Explain why you are disputing','error',4000); return; }
+  const tid = showToast('Raising dispute…','AI panel review running — may take 2–5 minutes','pending',0);
+  try {
+    await writeContract('raise_dispute', [Number(proposalId), reason.trim()]);
+    dismissToast(tid);
+    showToast('Dispute raised',`Stage dispute submitted for proposal #${proposalId}`,'success',4000);
+    await loadProposal(proposalId);
+    navigate('detail', proposalId);
+  } catch (e) {
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message),'error',6000);
+  }
+}
+
+async function handleSubmitProposal() {
+  const form = state.createForm;
+  if (!state.wallet) { showToast('Wallet not connected','Connect to submit proposals','error',3000); return; }
+  if (!form.title.trim()) { showToast('Title required','','error',3000); return; }
+  if (!form.description.trim()) { showToast('Description required','','error',3000); return; }
+  if (!form.duration) { showToast('Duration required','','error',3000); return; }
+  if (form.type === 'constitution_update' && !state.isAdmin) { showToast('Admin required','Only admins can submit constitution updates','error',4000); return; }
+  if (form.type === 'constitution_update' && !form.proposed_constitution.trim()) { showToast('Constitution text required','','error',3000); return; }
+
+  const tid = showToast('Submitting…','AI audit running — proposal submission takes 2–5 minutes on Studionet','pending',0);
+  try {
+    await writeContract('submit_proposal', [
+      form.title.trim(),
+      form.description.trim(),
+      Number(form.duration),
+      form.type,
+      form.proposed_constitution.trim(),
+    ]);
+    dismissToast(tid);
+    showToast('Proposal submitted','AI audit complete — check proposal status','success',5000);
+    state.createForm = { title:'', description:'', type:'standard', duration:86400, proposed_constitution:'' };
+    await loadProposals();
+    navigate('proposals');
+  } catch (e) {
+    dismissToast(tid);
+    showToast('Submission failed', mapError(e.message),'error',7000);
+  }
+}
+
+async function handleResubmit(proposalId, newDescription) {
+  if (!newDescription || !newDescription.trim()) { showToast('Description required','','error',3000); return; }
+  const tid = showToast('Resubmitting…','AI re-audit running — may take 2–5 minutes','pending',0);
+  try {
+    await writeContract('resubmit_proposal', [Number(proposalId), newDescription.trim()]);
+    dismissToast(tid);
+    showToast('Resubmitted','AI re-audit complete','success',4000);
+    await loadProposal(proposalId);
+    navigate('detail', proposalId);
+  } catch (e) {
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message),'error',6000);
+  }
+}
+
+async function handleAddAdmin(address) {
+  if (!address.trim()) { showToast('Address required','','error',3000); return; }
+  const tid = showToast('Adding admin…','Waiting for confirmation (1–4 min)','pending',0);
+  try {
+    await writeContract('add_admin', [address.trim().toLowerCase()]);
+    dismissToast(tid);
+    showToast('Admin added',formatAddress(address),'success',4000);
+    await loadAdmins();
+    render();
+  } catch (e) {
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message),'error',6000);
+  }
+}
+
+async function handleProposeAdminAction(actionType, params) {
+  const tid = showToast('Proposing action…','Submitting to chain (1–4 min)','pending',0);
+  try {
+    await writeContract('propose_admin_action', [actionType, JSON.stringify(params)]);
+    dismissToast(tid);
+    showToast('Action proposed','A second admin must approve within 24h','success',5000);
+    await loadPendingActions();
+    updateWalletUI();
+    render();
+  } catch (e) {
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message),'error',6000);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   GOVERNANCE PROCESS STRIP
+   Shows where a proposal sits in the full lifecycle.
+   ══════════════════════════════════════════════════════════ */
+function processStripHtml(p) {
+  const steps = [
+    { key: 'submitted',  label: 'Submitted'  },
+    { key: 'audit',      label: 'AI Audit'   },
+    { key: 'voting',     label: 'Voting'     },
+    { key: 'finalized',  label: 'Finalized'  },
+  ];
+
+  const statusToStep = {
+    needs_revision:              'audit',
+    pending:                     'voting',
+    under_review:                'finalized',
+    pending_constitution_confirm:'finalized',
+    accepted:                    'done',
+    rejected:                    'done',
+    cancelled:                   'done',
+  };
+
+  const currentStep = statusToStep[p.status] || 'submitted';
+
+  const stepOrder = ['submitted','audit','voting','finalized','done'];
+  const currentIdx = stepOrder.indexOf(currentStep);
+
+  const stepsHtml = steps.map((step, i) => {
+    let cls = 'future';
+    if (i < currentIdx || currentStep === 'done') cls = 'done';
+    else if (stepOrder[i] === currentStep) cls = 'active';
+
+    const icon = cls === 'done' ? '✓ ' : '';
+    return `<span class="process-step ${cls}">${icon}${step.label}</span>`;
+  }).join('<span class="process-arrow">›</span>');
+
+  return `<div class="process-strip" role="navigation" aria-label="Proposal progress">${stepsHtml}</div>`;
+}
+
+/* ══════════════════════════════════════════════════════════
+   PAGE RENDERERS
+   ══════════════════════════════════════════════════════════ */
+
+function renderActionBanner() {
+  const finalizeable = state.proposals.filter(p => p.status === 'pending' && isVotingClosed(p.voting_end));
+  const confirmNeeded = state.proposals.filter(p => p.status === 'pending_constitution_confirm' && state.isAdmin);
+  if (finalizeable.length === 0 && confirmNeeded.length === 0) return '';
+  let text, cta, action;
+  if (confirmNeeded.length > 0) {
+    const p = confirmNeeded[0];
+    text = `<strong>Proposal #${p.id}</strong> — vote passed. Admin confirmation required to apply constitutional amendment.`;
+    cta = 'Confirm now'; action = `navigate('detail',${p.id})`;
+  } else {
+    const p = finalizeable[0];
+    text = `<strong>Proposal #${p.id} "${esc((p.title||'').slice(0,40))}${(p.title||'').length>40?'…':''}"</strong> — voting closed, ready to finalize`;
+    cta = 'Close voting →'; action = `handleFinalize(${p.id})`;
+  }
+  return `<div class="action-banner" role="alert"><div class="container"><div class="action-banner-inner"><span class="action-banner-text">${text}</span><button class="btn-banner" onclick="${action}">${cta}</button></div></div></div>`;
+}
+
+function renderProposalsFeed() {
+  const filter = state.filters.proposals;
+  let filtered = state.proposals;
+  if (filter === 'active') filtered = state.proposals.filter(p => ['pending','needs_revision','under_review'].includes(p.status));
+  else if (filter === 'attention') filtered = state.proposals.filter(p =>
+    (p.status==='pending' && isVotingClosed(p.voting_end)) ||
+    p.status==='pending_constitution_confirm' ||
+    (p.status==='needs_revision' && (p.proposer||'').toLowerCase()===(state.wallet||'').toLowerCase())
+  );
+
+  const skeletons = state.loading.proposals
+    ? [1,2,3].map(() => `<div class="skeleton-card"><div class="sk-badge"></div><div class="sk-line" style="width:75%"></div><div class="sk-line" style="width:50%;margin-bottom:12px"></div><div class="sk-bar"></div></div>`).join('')
+    : '';
+
+  const cardsHtml = state.loading.proposals ? skeletons : filtered.length === 0
+    ? `<div class="empty-state"><div class="empty-icon" aria-hidden="true">📜</div><div class="empty-title">No ${filter==='active'?'active ':filter==='attention'?'attention-needed ':''}proposals</div><div class="empty-sub">${filter==='active'?'All proposals have been finalized. Submit a new proposal to start a governance discussion.':'Everything is up to date.'}</div><div><button class="btn-primary" onclick="navigate('create')" style="margin-right:8px">Submit proposal</button><button class="btn-secondary" onclick="setFilter('all')">View all</button></div></div>`
+    : filtered.map((p,i) => {
+        const yr = Number(p.votes_yes||0), nr = Number(p.votes_no||0), tr = yr+nr;
+        const yp = tr>0?Math.round((yr/tr)*100):0, np = tr>0?Math.round((nr/tr)*100):0;
+        const closed = isVotingClosed(p.voting_end);
+        let cta = '';
+        if (p.status==='pending' && !closed) cta = `<span class="card-cta">Vote →</span>`;
+        else if (p.status==='pending' && closed) cta = `<span class="card-cta" style="background:var(--s-revision-bg);border-color:var(--s-revision-border);color:var(--s-revision-text)">Finalize →</span>`;
+        else if (p.status==='needs_revision' && (p.proposer||'').toLowerCase()===(state.wallet||'').toLowerCase()) cta = `<span class="card-cta" style="background:var(--s-revision-bg);border-color:var(--s-revision-border);color:var(--s-revision-text)">Revise →</span>`;
+        else if (p.status==='pending_constitution_confirm' && state.isAdmin) cta = `<span class="card-cta" style="background:var(--s-confirm-bg);border-color:var(--s-confirm-border);color:var(--s-confirm-text)">Confirm →</span>`;
+        return `<article class="proposal-card${state.detailId==p.id?' selected':''}" style="animation-delay:${i*40}ms" onclick="navigate('detail',${p.id})" role="link" tabindex="0" onkeydown="if(event.key==='Enter')navigate('detail',${p.id})" aria-label="Proposal #${p.id}: ${esc(p.title)}, ${STATUS_LABELS[p.status]||p.status}">
+          <div class="card-badges">${badgeHtml(p.status)}${p.proposal_type==='constitution_update'?'<span class="badge constitution-type"><span class="badge-dot"></span>Constitution</span>':''}<span class="docket" style="margin-left:auto">GL-${String(p.id).padStart(4,'0')}</span></div>
+          <div class="card-top"><div class="card-title">${esc(p.title)}</div>${p.status==='pending'?timerHtml(p.voting_end,p):''}</div>
+          <div class="card-meta"><span>#${p.id}</span><span>·</span><span>${formatAddress(p.proposer)}</span><span>·</span><span>${formatTimestamp(Number(p.submitted_at))}</span></div>
+          ${tr>0?`<div class="mini-bar-wrap"><div class="mini-bar-yes" style="width:${yp}%"></div><div class="mini-bar-no" style="width:${np}%"></div></div>`:''}
+          <div class="card-bottom"><span style="font-size:12px;color:var(--text-secondary)">${tr>0?`${yp}% for · ${tr} vote${tr!==1?'s':''}`:'No votes yet'}</span><div style="display:flex;align-items:center;gap:6px">${aiChipHtml(p.ai_audit_decision)}${cta}</div></div>
+        </article>`;
+      }).join('');
+
+  const cfg = state.config || {};
+  const acc = state.proposals.filter(p=>p.status==='accepted').length;
+  const rej = state.proposals.filter(p=>p.status==='rejected').length;
+  const tot = state.proposals.length;
+  const rate = tot>0?Math.round((acc/tot)*100):0;
+
+  return `
+    ${renderActionBanner()}
+    <div class="container">
+      ${networkBannerHtml()}
+      <div class="page-header">
+        <h1 class="page-title">Proposals</h1>
+        <div class="page-header-right">
+          <div class="filter-row" role="group" aria-label="Filter proposals">
+            ${['active','attention','all'].map(f=>`<button class="filter-btn${state.filters.proposals===f?' active':''}" onclick="setFilter('${f}')" aria-pressed="${state.filters.proposals===f}">${f==='active'?'Active':f==='attention'?'Attention':'All'}</button>`).join('')}
+          </div>
+          <button class="btn-primary" onclick="navigate('create')">+ New proposal</button>
+        </div>
+      </div>
+      <div class="feed-layout">
+        <div class="feed-list">${cardsHtml}</div>
+        <aside class="sidebar">
+          <div class="sidebar-card">
+            <div class="sidebar-section">
+              <div class="t-label">Protocol overview</div>
+              <div class="stat-grid">
+                <div class="stat-cell"><div class="stat-val">${tot}</div><div class="stat-key">Total proposals</div></div>
+                <div class="stat-cell"><div class="stat-val">${rate}%</div><div class="stat-key">Acceptance rate</div></div>
+                <div class="stat-cell"><div class="stat-val">${Number(cfg.approval_threshold_percent||60)}%</div><div class="stat-key">Threshold</div></div>
+                <div class="stat-cell"><div class="stat-val">${Number(cfg.min_quorum||10)}</div><div class="stat-key">Min quorum</div></div>
+              </div>
+            </div>
+            ${state.loading.config?'':` <div class="sidebar-section">
+              <div class="t-label">Active admins (${state.admins.length} of ${cfg.max_admins||5})</div>
+              ${state.admins.slice(0,5).map((a,i)=>{
+                const you = a.toLowerCase()===(state.wallet||'').toLowerCase();
+                const bg = ['#DDD9FB,#4239C4','#D4F5E6,#1A6040','#FDE8D0,#8A4A08'][i%3].split(',');
+                return `<div class="roster-row"><div class="avatar" style="background:${bg[0]};color:${bg[1]}">${a.slice(2,4).toUpperCase()}</div><div style="flex:1"><div class="t-mono" style="font-size:11px;color:var(--text-secondary)">${formatAddress(a)}</div>${you?'<div style="font-size:10px;color:var(--text-info);font-weight:500">You</div>':''}</div></div>`;
+              }).join('')}
+            </div>`}
+            <div class="sidebar-section">
+              <div class="t-label" style="margin-bottom:10px">Recent activity</div>
+              ${state.history.slice(0,5).map(h=>`<div class="history-entry"><div style="font-size:12px;color:var(--text-primary)">${esc((h.details||'').slice(0,70))}${(h.details||'').length>70?'…':''}</div><div class="log-ts">${formatTimestamp(Number(h.timestamp))}</div></div>`).join('')}
+              ${state.history.length===0?'<div class="t-small" style="text-align:center;padding:8px 0">No history yet</div>':''}
+              <button class="btn-secondary full-w mt-8" style="font-size:12px" onclick="navigate('governance')">View full history →</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>`;
+}
+
+function setFilter(f) { state.filters.proposals = f; render(); }
+
+function renderProposalDetail() {
+  const p = state.currentProposal || state.proposals.find(x => x.id == state.detailId);
+  if (state.loading.detail && !p) {
+    return `<div class="container" style="padding-top:20px"><div class="skeleton-card" style="height:400px"><div class="sk-badge" style="margin-bottom:20px"></div><div class="sk-line" style="width:70%;height:20px;margin-bottom:12px"></div><div class="sk-line" style="width:50%"></div></div></div>`;
+  }
+  if (!p) return `<div class="container" style="padding-top:32px"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">Proposal not found</div><div class="empty-sub">This proposal may not exist.</div><button class="btn-primary" onclick="navigate('proposals')">Back to proposals</button></div></div>`;
+
+  const hasUpdate = p.proposal_type === 'constitution_update' && p.proposed_constitution;
+  const closed = isVotingClosed(p.voting_end);
+  const voted = state.userVotes[p.id];
+  const yr = Number(p.votes_yes||0), nr = Number(p.votes_no||0), tr = yr+nr;
+
+  return `<div class="container" style="padding-top:20px">
+    <button class="back-link" onclick="navigate('proposals')">← Proposals</button>
+    <div class="detail-layout">
+      <div class="detail-main">
+        <header>
+          ${processStripHtml(p)}
+          <div class="prop-meta-row">
+            <span class="docket">GL-${String(p.id).padStart(4,'0')}</span>
+            <span style="width:3px;height:3px;border-radius:50%;background:var(--text-tertiary);display:inline-block"></span>
+            ${badgeHtml(p.status)}
+            ${p.proposal_type==='constitution_update'?'<span class="badge constitution-type"><span class="badge-dot"></span>Constitution update</span>':''}
+            ${p.status==='pending'?timerHtml(p.voting_end,p):''}
+          </div>
+          <h1 class="prop-detail-title">${esc(p.title)}</h1>
+          <div class="prop-submeta">
+            <span>By <span class="t-mono">${formatAddress(p.proposer)}</span></span>
+            <span>${formatTimestamp(Number(p.submitted_at))}</span>
+            ${p.status==='pending'?`<span>Closes ${formatTimestamp(Number(p.voting_end))}</span>`:''}
+          </div>
+        </header>
+
+        <div>
+          <div class="t-label mb-8">Proposal</div>
+          <div class="content-card"><p class="prop-description">${esc(p.description)}</p></div>
+        </div>
+
+        ${hasUpdate?`<div><div class="t-label mb-8">Proposed constitutional amendment</div>${constitutionDiffHtml(p.constitution_snapshot,p.proposed_constitution)}</div>`:''}
+
+        <div>
+          <div class="t-label mb-8">Constitutional ${p.proposal_type==='constitution_update'?'amendment':'AI'} review</div>
+          ${auditPanelHtml(p)}
+        </div>
+
+        ${tr > 0 || p.status === 'pending' ? `<div>
+          <div class="t-label mb-8">Voting</div>
+          <div class="content-card">
+            ${voteBarHtml(p)}
+            ${p.status==='pending' && !closed && state.wallet && voted===undefined
+              ? `<div class="vote-buttons mt-16"><button class="btn-vote-for" onclick="handleVote(${p.id},true)">Vote for</button><button class="btn-vote-against" onclick="handleVote(${p.id},false)">Vote against</button></div>`
+              : ''}
+            ${voted!==undefined?`<div class="already-voted-msg mt-16"><span class="voted-dot" style="background:${voted?'var(--s-accepted-dot)':'var(--s-rejected-dot)'}"></span>You voted <strong>${voted?'for':'against'}</strong> this proposal</div>`:''}
+            ${p.status==='pending'&&closed?`<div class="mt-16"><button class="finalize-cta" onclick="handleFinalize(${p.id})"><span>⚖</span> Close voting &amp; record outcome</button><div class="form-note mt-8">Permissionless — anyone can close the vote</div></div>`:''}
+            ${!state.wallet&&p.status==='pending'&&!closed?`<div class="connect-prompt mt-16"><div class="t-small mb-8" style="text-align:center">Connect wallet to vote</div><button class="btn-primary full-w" onclick="connectWallet()">Connect wallet</button></div>`:''}
+          </div>
+        </div>` : ''}
+      </div>
+      <aside>${actionSidebarHtml(p)}</aside>
+    </div>
+  </div>`;
+}
+
+function renderCreateProposal() {
+  const form = state.createForm;
+  const cfg = state.config || {};
+  const durations = [{label:'1 hour',val:3600},{label:'6 hours',val:21600},{label:'1 day',val:86400},{label:'3 days',val:259200},{label:'7 days',val:604800}];
+  return `<div class="container" style="padding-top:20px;max-width:680px">
+    <button class="back-link" onclick="navigate('proposals')">← Proposals</button>
+    <h1 class="page-title" style="margin-bottom:4px;font-family:var(--font-display)">Create a proposal</h1>
+    <p class="t-small mb-16" style="margin-bottom:20px">Your proposal will be audited by the constitutional AI before entering the voting queue.</p>
+    <div style="background:var(--violet-50);border:.5px solid var(--violet-100);border-radius:8px;padding:12px 14px;margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">
+      <div style="width:20px;height:20px;background:var(--violet-500);border-radius:4px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:8px;font-weight:700;color:#fff;flex-shrink:0;margin-top:1px">AI</div>
+      <p style="font-size:13px;color:var(--text-info);line-height:1.5">The AI evaluates your proposal against the constitution at submission. Include a clear objective, specific execution steps, and an accountability mechanism. Submission may take 20–60 seconds while the AI audit runs.</p>
+    </div>
+    <div class="form-card">
+      <div class="form-section">
+        <div class="t-label mb-12">Proposal basics</div>
+        <div class="field">
+          <label class="field-label" for="c-title">Title <span class="field-hint">max 200 characters</span></label>
+          <div class="char-count-wrap">
+            <input class="field-input" id="c-title" type="text" placeholder="e.g. Treasury Transparency Dashboard" value="${esc(form.title)}" oninput="state.createForm.title=this.value;$('cc-title').textContent=this.value.length+'/200'" maxlength="200">
+            <span class="char-count" id="cc-title">${form.title.length}/200</span>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="c-desc">Description <span class="field-hint">max 5000 chars · include objective, steps, outcome, accountability</span></label>
+          <textarea class="field-input" id="c-desc" rows="6" placeholder="Describe what you're proposing, how it will be executed, what the expected outcome is, and how results will be reported..." oninput="state.createForm.description=this.value;$('cc-desc').textContent=this.value.length+'/5000'" maxlength="5000">${esc(form.description)}</textarea>
+          <div style="text-align:right;margin-top:3px"><span id="cc-desc" style="font-size:11px;color:var(--text-tertiary);font-family:var(--font-mono)">${form.description.length}/5000</span></div>
+        </div>
+        <div class="constitution-hint" onclick="navigate('constitution')" role="link" tabindex="0">
+          <div class="hint-label">📜 Constitutional requirements</div>
+          <div class="hint-quote">"Clear objective, specific execution steps, measurable outcomes, and accountability mechanism." — §1.1, §2.2</div>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="t-label mb-12">Proposal type</div>
+        <div class="type-toggle">
+          <button class="type-opt${form.type==='standard'?' selected':''}" onclick="state.createForm.type='standard';render()" aria-pressed="${form.type==='standard'}"><div class="type-opt-title">Standard proposal</div><div class="type-opt-desc">Governance, funding, or protocol decisions.</div></button>
+          <button class="type-opt${form.type==='constitution_update'?' selected':''}" onclick="state.createForm.type='constitution_update';render()" aria-pressed="${form.type==='constitution_update'}"><div class="type-opt-title">Constitution update</div><div class="type-opt-desc">Amend the governing constitution. Admin-only.</div></button>
+        </div>
+        ${form.type==='constitution_update'&&!state.isAdmin?`<div class="error-banner mt-8"><span>⚠</span><div><div class="error-title">Admin required</div><div class="error-msg" style="margin-bottom:0">Only admins can submit constitution update proposals.</div></div></div>`:''}
+        ${form.type==='constitution_update'&&state.isAdmin?`<div class="field mt-12"><label class="field-label" for="c-const">Proposed constitution text</label><textarea class="field-input" id="c-const" rows="8" placeholder="Paste the full proposed constitution with your changes applied..." oninput="state.createForm.proposed_constitution=this.value">${esc(form.proposed_constitution)}</textarea><div class="form-note" style="text-align:left;margin-top:4px">This will be diffed against the current constitution for voters to review.</div></div>`:''}
+      </div>
+      <div class="form-section">
+        <div class="t-label mb-12">Voting window</div>
+        <div class="field-label mb-8">Duration <span class="field-hint">between ${formatSeconds(cfg.min_voting_duration||3600)} and ${formatSeconds(cfg.max_voting_duration||2592000)}</span></div>
+        <div class="duration-chips">
+          ${durations.map(d=>`<button class="dur-chip${form.duration===d.val?' selected':''}" onclick="state.createForm.duration=${d.val};render()" aria-pressed="${form.duration===d.val}">${d.label}</button>`).join('')}
+        </div>
+        <div class="form-note" style="text-align:left;margin-top:8px">Voting opens immediately when the AI audit passes. Window: ${formatSeconds(form.duration)}.</div>
+      </div>
+      <div class="form-section">
+        <button class="btn-primary full-w" onclick="handleSubmitProposal()" ${form.type==='constitution_update'&&!state.isAdmin?'disabled':''}>Submit for AI review →</button>
+        <div class="form-note">Creates a blockchain transaction. AI audit runs at submission time and may take 20–60s.</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderResubmit() {
+  const p = state.proposals.find(x => x.id == state.detailId);
+  if (!p) { navigate('proposals'); return ''; }
+  const cfg = state.config||{};
+  const remaining = Number(cfg.max_resubmissions||3) - Number(p.resubmit_count||0);
+  const conflicts = Array.isArray(p.constitutional_conflicts)?p.constitutional_conflicts:[];
+
+  return `<div class="container" style="padding-top:20px;max-width:680px">
+    <button class="back-link" onclick="navigate('detail',${p.id})">← Proposal #${p.id}</button>
+    <h1 class="page-title" style="margin-bottom:4px;font-family:var(--font-display)">Revision required</h1>
+    <p class="t-small mb-16" style="margin-bottom:20px">Address the issues below and resubmit for AI re-audit.</p>
+    ${conflicts.length>0?`<div class="revision-panel mb-16"><div class="revision-header"><div class="revision-title"><span class="revision-icon">!</span>${conflicts.length} issue${conflicts.length!==1?'s':''} to address</div><span class="revision-count-chip">${remaining} revision${remaining!==1?'s':''} remaining</span></div><div class="revision-body">${conflicts.map((c,i)=>`<div class="checklist-item"><div class="check-num">${i+1}</div><div><div class="check-clause">${esc(c.clause)}</div><div class="check-issue">${esc(c.violation)}</div></div></div>`).join('')}</div></div>`:''}
+    <div class="form-card">
+      <div class="form-section">
+        <label class="field-label" for="r-desc">Updated description</label>
+        <textarea class="field-input" id="r-desc" rows="7" placeholder="Address the issues identified above...">${esc(p.description)}</textarea>
+      </div>
+      <div class="form-section">
+        <button class="btn-primary full-w" onclick="handleResubmit(${p.id},document.getElementById('r-desc').value)">Resubmit for AI review →</button>
+        <div class="form-note">Re-audit uses the constitution snapshot from your original submission. ${remaining} revision${remaining!==1?'s':''} remaining.</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderConstitution() {
+  const text = state.constitution;
+  const pendingUpdate = state.proposals.find(p => p.proposal_type==='constitution_update' && p.status==='pending_constitution_confirm');
+
+  if (!text) return `<div class="container" style="padding-top:32px"><div class="empty-state"><div class="empty-icon">📜</div><div class="empty-title">Loading constitution…</div><div class="empty-sub">Fetching from the GenLayer network.</div></div></div>`;
+
+  const articles = text.split(/\n(?=ARTICLE \d+)/);
+  return `<div class="container" style="padding-top:24px;max-width:780px">
+    ${pendingUpdate?`<div style="background:var(--s-confirm-bg);border:.5px solid var(--s-confirm-border);border-radius:8px;padding:14px 16px;margin-bottom:24px;display:flex;align-items:flex-start;gap:10px" role="alert"><span>⚠</span><div style="flex:1"><div style="font-size:13px;font-weight:500;color:var(--s-confirm-text);margin-bottom:4px">Constitutional amendment pending</div><div style="font-size:12px;color:var(--s-confirm-text);opacity:.85;line-height:1.5">Proposal #${pendingUpdate.id} "${esc(pendingUpdate.title)}" has passed the community vote and is awaiting admin confirmation.</div>${state.isAdmin?`<button class="btn-primary mt-8" style="font-size:12px;padding:5px 14px;background:var(--s-confirm-dot)" onclick="navigate('detail',${pendingUpdate.id})">Review and confirm →</button>`:''}</div></div>`:''}
+    <div class="page-header" style="padding-bottom:16px">
+      <h1 class="page-title">Constitution</h1>
+      <div class="page-header-right"><span class="t-mono" style="font-size:11px">v1.0</span>${pendingUpdate?`<span class="badge pending_constitution_confirm"><span class="badge-dot"></span>Amendment pending</span>`:`<span class="badge accepted"><span class="badge-dot"></span>Active</span>`}</div>
+    </div>
+    <div style="font-size:14px;line-height:1.75;color:var(--text-primary)">
+      ${articles.map(article=>{
+        if (!article.trim()) return '';
+        const lines = article.trim().split('\n');
+        const title = lines[0].trim();
+        const blocks = lines.slice(1).join('\n').split(/\n(?=\d+\.\d+)/).filter(Boolean);
+        return `<div class="const-article"><div class="const-article-title">${esc(title)}</div>${blocks.map(block=>{
+          const bl = block.trim().split('\n');
+          const m = bl[0].trim().match(/^(\d+\.\d+)\s+(.+)/);
+          if (!m) return `<p style="font-size:13px;line-height:1.7;color:var(--text-secondary);margin-bottom:12px">${esc(block.trim())}</p>`;
+          const [,num,ctitle] = m;
+          const ctext = bl.slice(1).join('\n').trim();
+          return `<div class="const-clause" id="clause-${num.replace('.','-')}"><div class="const-clause-num">§ ${esc(num)}</div><div class="const-clause-title">${esc(ctitle)}</div>${ctext?`<div class="const-clause-text">${esc(ctext)}</div>`:''}</div>`;
+        }).join('')}</div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+function renderGovernance() {
+  const cfg = state.config||{};
+  const acc = state.proposals.filter(p=>p.status==='accepted').length;
+  const rej = state.proposals.filter(p=>p.status==='rejected').length;
+  const disp = state.proposals.reduce((s,p)=>s+Number(p.dispute_count||0),0);
+  const tot = state.proposals.length;
+
+  return `<div class="container" style="padding-top:24px">
+    <div class="page-header"><h1 class="page-title">Governance</h1></div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:24px">
+      <div style="grid-column:span 2;display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+        ${[['Total',tot],['Accepted',acc],['Rejected',rej],['Disputes',disp]].map(([k,v])=>`<div class="stat-cell"><div class="stat-val">${v}</div><div class="stat-key">${k}</div></div>`).join('')}
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr;gap:16px">
+      <div class="admin-card">
+        <div class="admin-card-header"><span class="admin-card-title">Protocol parameters</span></div>
+        <div class="admin-card-body">
+          ${[
+            ['Eligibility mode', cfg.eligibility_mode||'—'],
+            ['Approval threshold', `${cfg.approval_threshold_percent||60}%`],
+            ['Minimum quorum', `${cfg.min_quorum||10} votes`],
+            ['Min voting duration', formatSeconds(cfg.min_voting_duration||3600)],
+            ['Max voting duration', formatSeconds(cfg.max_voting_duration||2592000)],
+            ['Max dispute stages', cfg.max_dispute_stages||3],
+            ['Dispute cooldown', formatSeconds(cfg.dispute_cooldown_seconds||3600)],
+            ['Max resubmissions', cfg.max_resubmissions||3],
+            ['Contract address', formatAddress(CONFIG.CONTRACT_ADDRESS)],
+            ['Network', CONFIG.NETWORK_NAME],
+          ].map(([k,v])=>`<div class="param-row"><span class="param-key">${esc(String(k))}</span><span class="param-val">${esc(String(v))}</span></div>`).join('')}
+        </div>
+      </div>
+      <div>
+        <div class="t-label mb-12">Governance activity log</div>
+        <div class="sidebar-card">
+          <div class="sidebar-section" style="border-bottom:none">
+            ${state.history.length===0?`<div class="t-small" style="text-align:center;padding:12px 0">No history yet</div>`:state.history.map(h=>`<div class="history-entry"><div style="display:flex;align-items:center;gap:8px"><span style="width:7px;height:7px;border-radius:50%;background:${h.change_type.includes('accept')?'var(--s-accepted-dot)':h.change_type.includes('reject')?'var(--s-rejected-dot)':h.change_type.includes('admin')?'var(--s-confirm-dot)':'var(--violet-300)'};flex-shrink:0"></span><div style="font-size:12px;color:var(--text-primary)">${esc((h.details||'').slice(0,90))}${(h.details||'').length>90?'…':''}</div></div><div class="log-ts">${formatTimestamp(Number(h.timestamp))} · <span style="color:var(--text-info)">${esc((h.change_type||'').replace(/_/g,' '))}</span></div></div>`).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderAdmin() {
+  if (!state.isAdmin) return `<div class="container" style="padding-top:32px;max-width:580px"><div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-title">Admin access required</div><div class="empty-sub">Your connected wallet does not have admin privileges for this DAO.</div><button class="btn-primary" onclick="navigate('proposals')">Back to proposals</button></div></div>`;
+  const cfg = state.config||{};
+  const pending = state.pendingActions.filter(a=>a.status==='pending');
+  const myAddr = (state.wallet||'').toLowerCase();
+
+  return `<div class="container" style="padding-top:24px">
+    <div class="page-header"><h1 class="page-title">Admin panel</h1></div>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">Sensitive actions require approval from a second admin within 24 hours.</p>
+    <div class="admin-grid">
+      <div class="admin-card">
+        <div class="admin-card-header"><span class="admin-card-title">Pending multisig actions</span>${pending.length>0?`<span class="badge pending_constitution_confirm" style="font-size:10px"><span class="badge-dot"></span>${pending.length} pending</span>`:'<span class="t-small">None</span>'}</div>
+        <div class="admin-card-body">
+          ${pending.length===0?'<div class="t-small" style="text-align:center;padding:12px 0">No pending actions</div>':pending.map(a=>{
+            const params = (() => { try { return JSON.parse(a.params); } catch(_) { return {}; } })();
+            const isYours = (a.proposer||'').toLowerCase() === myAddr;
+            return `<div class="multisig-action-card"><div style="font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--s-confirm-text);margin-bottom:5px">${esc((a.action_type||'').replace(/_/g,' '))}</div><div style="font-size:12px;color:var(--text-primary);margin-bottom:3px">${a.action_type==='remove_admin'?`Remove: <span class="t-mono">${formatAddress(params.target)}</span>`:a.action_type==='set_eligibility_mode'?`Set mode: <strong>${esc(params.mode)}</strong>`:a.action_type==='constitution_update_propose'?`Confirm constitution for #${params.proposal_id}`:esc(a.action_type)}</div><div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px">By ${formatAddress(a.proposer)} · expires ${formatCountdown(Number(a.proposed_at)+86400)}</div>${isYours?'<div style="font-size:11px;color:var(--text-tertiary);font-style:italic">You proposed this — a different admin must approve</div>':`<button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="handleApproveAction('${esc(a.action_id)}')">Approve &amp; execute</button>`}</div>`;
+          }).join('')}
+        </div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-header"><span class="admin-card-title">Active admins</span><span class="badge accepted" style="font-size:10px"><span class="badge-dot"></span>${state.admins.length} of ${cfg.max_admins||5}</span></div>
+        <div class="admin-card-body">
+          ${state.admins.map((a,i)=>{
+            const you = a.toLowerCase()===myAddr;
+            const bg = ['#DDD9FB,#4239C4','#D4F5E6,#1A6040','#FDE8D0,#8A4A08'][i%3].split(',');
+            return `<div class="roster-row"><div class="avatar" style="background:${bg[0]};color:${bg[1]}">${a.slice(2,4).toUpperCase()}</div><div style="flex:1"><div class="t-mono" style="font-size:11px;color:var(--text-secondary)">${a}</div>${you?'<div style="font-size:10px;color:var(--text-info);font-weight:500">You</div>':''}</div>${!you&&state.admins.length>2?`<button class="btn-secondary" style="font-size:11px;padding:3px 10px" onclick="handleProposeAdminAction('remove_admin',{target:'${a}'})">Propose remove</button>`:''}</div>`;
+          }).join('')}
+          <div class="mt-12">
+            <input class="field-input" id="new-admin-input" placeholder="0x… wallet address to add" style="margin-bottom:6px">
+            <button class="btn-secondary full-w" style="font-size:12px" onclick="handleAddAdmin(document.getElementById('new-admin-input').value)">+ Add admin</button>
+          </div>
+        </div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-header"><span class="admin-card-title">Protocol parameters</span></div>
+        <div class="admin-card-body">
+          ${[
+            ['Min quorum', `${cfg.min_quorum||10} votes`],
+            ['Approval threshold', `${cfg.approval_threshold_percent||60}%`],
+            ['Min voting', formatSeconds(cfg.min_voting_duration||3600)],
+            ['Max voting', formatSeconds(cfg.max_voting_duration||2592000)],
+            ['Dispute stages', cfg.max_dispute_stages||3],
+            ['Dispute cooldown', formatSeconds(cfg.dispute_cooldown_seconds||3600)],
+            ['Max resubmissions', cfg.max_resubmissions||3],
+          ].map(([k,v])=>`<div class="param-row"><span class="param-key">${esc(String(k))}</span><span class="param-val">${esc(String(v))}</span></div>`).join('')}
+          <div class="form-note" style="text-align:left;margin-top:10px">Use set_governance_params() and set_safety_params() via the contract to update these values.</div>
+        </div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-header"><span class="admin-card-title">Eligibility &amp; whitelist</span><span class="badge accepted" style="font-size:10px"><span class="badge-dot"></span>${cfg.eligibility_mode||'open'}</span></div>
+        <div class="admin-card-body">
+          ${[
+            ['Voting whitelist', cfg.use_whitelist_for_voting?'Active':'Inactive'],
+            ['Proposing whitelist', cfg.use_whitelist_for_proposing?'Active':'Inactive'],
+            ['Voting token', (cfg.voting_token||'').replace(/^0x0+$/,'None (open)')===cfg.voting_token?formatAddress(cfg.voting_token):'None (open)'],
+            ['Min tokens (vote)', cfg.min_tokens_to_vote||0],
+            ['Min tokens (propose)', cfg.min_tokens_to_propose||0],
+          ].map(([k,v])=>`<div class="param-row"><span class="param-key">${esc(String(k))}</span><span class="param-val">${esc(String(v))}</span></div>`).join('')}
+          ${Object.keys(state.whitelist).length>0?`<div style="margin-top:12px"><div class="t-label mb-8">Whitelisted addresses</div>${Object.entries(state.whitelist).map(([addr,perms])=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:.5px solid var(--border);font-size:12px"><span class="t-mono" style="flex:1;font-size:11px">${formatAddress(addr)}</span><span style="color:var(--s-accepted-text)">${perms.can_vote&&perms.can_propose?'vote + propose':perms.can_vote?'vote only':'propose only'}</span></div>`).join('')}</div>`:''}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderDisputeForm() {
+  const p = state.proposals.find(x=>x.id==state.detailId);
+  if (!p) { navigate('proposals'); return ''; }
+  const cfg = state.config||{};
+  return `<div class="container" style="padding-top:20px;max-width:640px">
+    <button class="back-link" onclick="navigate('detail',${p.id})">← Proposal #${p.id}</button>
+    <h1 class="page-title" style="margin-bottom:4px;font-family:var(--font-display)">Raise a dispute</h1>
+    <p class="t-small mb-16" style="margin-bottom:20px">Stage ${Number(p.dispute_count||0)+1} of maximum ${cfg.max_dispute_stages||3} · Triggers AI re-evaluation.</p>
+    ${Number(p.dispute_count||0)>0?`<div class="mb-16"><div class="t-label mb-8">Previous stages</div>${disputeTimelineHtml(p.dispute_history)}</div>`:''}
+    <div class="form-card">
+      <div class="form-section">
+        <label class="field-label" for="dispute-reason">Reason for dispute</label>
+        <textarea class="field-input" id="dispute-reason" rows="5" placeholder="Explain why the AI audit decision should be reconsidered…"></textarea>
+      </div>
+      <div class="form-section">
+        <button class="btn-primary full-w" onclick="handleSubmitDispute(${p.id},document.getElementById('dispute-reason').value)">Submit dispute →</button>
+        <div class="form-note">Stage ${Number(p.dispute_count||0)+1} · ${Number(p.dispute_count||0)+1===1?'Re-evaluation of the original audit':'Independent AI panel review'}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+
+function renderAbout() {
+  const cfg = state.config || {};
+  return `<div class="container">
+    <div class="about-section">
+
+      <div class="page-header" style="padding-bottom:16px">
+        <h1 class="page-title">About GovLayer</h1>
+      </div>
+
+      <p class="about-lead">
+        GovLayer is a constitutional governance protocol built on GenLayer.
+        Every proposal is evaluated by an AI against a living, on-chain constitution
+        before the community votes — combining the rigour of constitutional review
+        with the openness of decentralised participation.
+      </p>
+
+      <div style="background:var(--surface-card);border:.5px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:28px">
+        <div class="t-label mb-12">Deployed contract</div>
+        <div style="display:flex;flex-wrap:wrap;gap:12px">
+          ${[
+            ['Contract', '0xAD5ecc8A49EaaA6D71A9a820b12D359c2D0597fb'],
+            ['Network',  'GenLayer Studionet'],
+            ['Chain ID', '61999'],
+            ['RPC',      'studio.genlayer.com/api'],
+          ].map(([k,v]) => `<div style="background:var(--surface);border:.5px solid var(--border);border-radius:7px;padding:10px 14px;flex:1;min-width:180px"><div class="t-label" style="margin-bottom:4px">${k}</div><div class="t-mono" style="font-size:11px;color:var(--text-secondary);word-break:break-all">${v}</div></div>`).join('')}
+        </div>
+      </div>
+
+      <h2 class="about-h2">How it works</h2>
+      <div class="about-flow">
+        ${[
+          ['Submit a proposal',   'Any eligible address submits a proposal with a title, description, and voting duration. Constitution update proposals are admin-only.'],
+          ['AI constitutional audit', 'The GenVM AI reviews the proposal against the current constitution and returns accept, revise, or reject with specific clause citations. This happens at submission time, before any votes are cast.'],
+          ['Community voting',    'Accepted proposals enter a voting window. Any eligible address votes for or against. Votes are locked — no changing after casting.'],
+          ['Finalization',        'Once the voting window closes, anyone can call finalize to record the outcome. If quorum is met and the approval threshold is reached, the proposal passes.'],
+          ['Dispute resolution',  'Rejected or accepted proposals can be disputed by the proposer or any voter. Each dispute triggers a fresh AI re-evaluation — up to 3 stages with a 1-hour cooldown between stages.'],
+          ['Constitution updates','Successful constitutional amendments require admin confirmation before the on-chain constitution is updated. Dispute-accepted amendments require 2-admin multisig approval.'],
+        ].map(([title, desc], i) => `
+          <div class="about-flow-step">
+            <div class="about-flow-num">${i+1}</div>
+            <div><div class="about-flow-title">${title}</div><div class="about-flow-desc">${desc}</div></div>
+          </div>`).join('')}
+      </div>
+
+      <h2 class="about-h2">Governance parameters</h2>
+      <table class="about-table">
+        <thead><tr><th>Parameter</th><th>Current value</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>approval_threshold</td><td>${cfg.approval_threshold_percent || 60}%</td><td>Minimum yes-vote share for a proposal to pass</td></tr>
+          <tr><td>min_quorum</td><td>${cfg.min_quorum || 10} votes</td><td>Minimum total votes for a result to be valid</td></tr>
+          <tr><td>min_voting_duration</td><td>${formatSeconds(cfg.min_voting_duration || 3600)}</td><td>Shortest allowed voting window</td></tr>
+          <tr><td>max_voting_duration</td><td>${formatSeconds(cfg.max_voting_duration || 2592000)}</td><td>Longest allowed voting window</td></tr>
+          <tr><td>max_dispute_stages</td><td>${cfg.max_dispute_stages || 3}</td><td>Maximum AI re-evaluations per proposal</td></tr>
+          <tr><td>dispute_cooldown</td><td>${formatSeconds(cfg.dispute_cooldown_seconds || 3600)}</td><td>Minimum time between dispute stages</td></tr>
+          <tr><td>max_resubmissions</td><td>${cfg.max_resubmissions || 3}</td><td>Maximum revisions a proposer can make</td></tr>
+          <tr><td>eligibility_mode</td><td>${cfg.eligibility_mode || 'open'}</td><td>Who can vote and propose (open / erc20 / nft / whitelist)</td></tr>
+        </tbody>
+      </table>
+
+      <h2 class="about-h2">Proposal statuses</h2>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px">
+        ${[
+          ['pending',                    'Voting is open — eligible addresses can cast votes'],
+          ['needs_revision',             'AI returned revise — proposer must edit and resubmit'],
+          ['accepted',                   'Proposal passed both AI audit and community vote'],
+          ['rejected',                   'Failed vote, quorum, or AI audit — can be disputed'],
+          ['under_review',               'Dispute in progress — AI panel deliberating'],
+          ['pending_constitution_confirm','Constitution update passed — awaiting admin confirmation'],
+          ['cancelled',                  'Cancelled by the proposer before finalization'],
+        ].map(([status, desc]) => `
+          <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:.5px solid var(--border)">
+            ${badgeHtml(status)}
+            <span style="font-size:13px;color:var(--text-secondary)">${desc}</span>
+          </div>`).join('')}
+      </div>
+
+      <h2 class="about-h2">Technical notes</h2>
+      <p class="about-p">GovLayer is built as a single Python intelligent contract on GenLayer, a blockchain that runs AI natively inside its virtual machine (GenVM). The AI audit uses <code style="font-family:var(--font-mono);font-size:12px;background:var(--surface-card);padding:1px 5px;border-radius:3px">gl.vm.run_nondet_unsafe</code> with a structural validator — multiple validator nodes must agree on the categorical decision (accept / revise / reject) before the result is committed to state.</p>
+      <p class="about-p">Transactions on GenLayer Studionet typically take 1–4 minutes to finalize as validators reach consensus on the AI output. AI-heavy operations like proposal submission and dispute resolution can take 2–5 minutes.</p>
+      <p class="about-p">The frontend is a single HTML file with no framework and no build step. It connects to the contract via the <a href="https://github.com/genlayerlabs/genlayer-js" target="_blank" class="about-link">genlayer-js SDK</a> loaded from esm.sh.</p>
+
+      <h2 class="about-h2">Resources</h2>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+        ${[
+          ['GenLayer Documentation', 'https://docs.genlayer.com'],
+          ['GenLayer Studio', 'https://studio.genlayer.com'],
+          ['genlayer-js SDK', 'https://github.com/genlayerlabs/genlayer-js'],
+          ['Contract source', 'https://github.com/YOUR_USERNAME/govlayer/blob/main/contract/govlayer_v4.py'],
+        ].map(([label, href]) => `<a href="${href}" target="_blank" rel="noopener" style="padding:8px 14px;background:var(--surface-card);border:.5px solid var(--border);border-radius:7px;font-size:13px;color:var(--text-primary);transition:border-color var(--dur-fast);display:inline-flex;align-items:center;gap:5px" onmouseover="this.style.borderColor='var(--ink-300)'" onmouseout="this.style.borderColor='var(--border)'">${label} ↗</a>`).join('')}
+      </div>
+
+    </div>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════
+   MAIN RENDER
+   ══════════════════════════════════════════════════════════ */
+function render() {
+  const body = $('page-body');
+  let html = '';
+  switch (state.page) {
+    case 'proposals':    html = renderProposalsFeed(); break;
+    case 'detail':       html = renderProposalDetail(); break;
+    case 'create':       html = renderCreateProposal(); break;
+    case 'resubmit':     html = renderResubmit(); break;
+    case 'constitution': html = renderConstitution(); break;
+    case 'governance':   html = renderGovernance(); break;
+    case 'admin':        html = renderAdmin(); break;
+    case 'dispute-form': html = renderDisputeForm(); break;
+    case 'about':        html = renderAbout(); break;
+    default:             html = renderProposalsFeed();
+  }
+  body.innerHTML = html;
+  updateWalletUI();
+}
+
+/* ══════════════════════════════════════════════════════════
+   INIT
+   ══════════════════════════════════════════════════════════ */
+async function init() {
+  // Show loading state immediately
+  render();
+
+  // Boot data from live contract
+  await initData();
+
+  // Re-check admin status if wallet already connected (page refresh)
+  if (state.wallet) {
+    state.isAdmin = state.admins.some(a => a.toLowerCase() === state.wallet);
+    updateWalletUI();
+    render();
+  }
+
+  // Start countdown timer display refresh
+  setInterval(() => {
+    // Lightweight: only update visible timer elements without full re-render
+    document.querySelectorAll('.timer[data-end]').forEach(el => {
+      const end = parseInt(el.dataset.end);
+      if (isNaN(end)) return;
+      const cd = formatCountdown(end);
+      if (isVotingClosed(end)) {
+        el.textContent = 'Closed'; el.classList.add('closed'); el.classList.remove('urgent');
+      } else {
+        el.textContent = `⏱ ${cd}`;
+        if (isUrgent(end)) el.classList.add('urgent'); else el.classList.remove('urgent');
+      }
+    });
+  }, 15000);
+}
+
+init();
+</script>
+</body>
+</html>
