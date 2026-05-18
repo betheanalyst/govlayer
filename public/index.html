@@ -837,6 +837,70 @@ const state = {
   renderGeneration: 0,
 };
 
+/* ── Admin form draft state — isolated from polling re-renders ───────────────
+   renderAdmin() reads from _adminDraft (not cfg directly) for form field values.
+   onadminInput() is called on every keystroke to persist values here.
+   Polling re-renders call syncAdminDraftFromDOM() before render() to snapshot
+   current field values, then renderAdmin() repopulates them from _adminDraft.
+   This means users can type freely without any background refresh clearing input.
+─────────────────────────────────────────────────────────────────────────────── */
+const _adminDraft = {
+  // Governance params
+  quorum: null, threshold: null, minDur: null, maxDur: null,
+  // Safety params
+  stages: null, cooldown: null, resubmit: null,
+  // Token rules
+  tokenAddr: null, minVote: null, minPropose: null,
+  // Whitelist toggles
+  wlVote: null, wlPropose: null,
+  // Whitelist address entry
+  wlAddr: '', wlCanVote: true, wlCanPropose: true,
+  // Add admin
+  newAdmin: '',
+};
+
+/* Snapshot current admin form DOM values into _adminDraft.
+   Called immediately before any render() that will replace the admin panel. */
+function syncAdminDraftFromDOM() {
+  if (state.page !== 'admin') return;
+  const read = (id, fallback = null) => { const el = $(id); return el ? el.value : fallback; };
+  const readBool = (id, fallback = true) => { const el = $(id); return el ? el.checked : fallback; };
+  _adminDraft.quorum      = read('ap-quorum',     _adminDraft.quorum);
+  _adminDraft.threshold   = read('ap-threshold',  _adminDraft.threshold);
+  _adminDraft.minDur      = read('ap-mindur',     _adminDraft.minDur);
+  _adminDraft.maxDur      = read('ap-maxdur',     _adminDraft.maxDur);
+  _adminDraft.stages      = read('sp-stages',     _adminDraft.stages);
+  _adminDraft.cooldown    = read('sp-cooldown',   _adminDraft.cooldown);
+  _adminDraft.resubmit    = read('sp-resubmit',   _adminDraft.resubmit);
+  _adminDraft.tokenAddr   = read('tr-token',      _adminDraft.tokenAddr);
+  _adminDraft.minVote     = read('tr-minvote',    _adminDraft.minVote);
+  _adminDraft.minPropose  = read('tr-minpropose', _adminDraft.minPropose);
+  _adminDraft.wlVote      = readBool('wl-vote',   _adminDraft.wlVote);
+  _adminDraft.wlPropose   = readBool('wl-propose', _adminDraft.wlPropose);
+  _adminDraft.wlAddr      = read('wl-addr',       _adminDraft.wlAddr);
+  _adminDraft.wlCanVote   = readBool('wl-canvote',    _adminDraft.wlCanVote);
+  _adminDraft.wlCanPropose = readBool('wl-canpropose', _adminDraft.wlCanPropose);
+  _adminDraft.newAdmin    = read('new-admin-input', _adminDraft.newAdmin);
+}
+
+/* Initialise _adminDraft from config when entering admin panel for the first time,
+   or after a successful write (to reflect the newly confirmed values). */
+function resetAdminDraftFromConfig() {
+  const cfg = state.config || {};
+  _adminDraft.quorum      = String(cfg.min_quorum                 ?? 10);
+  _adminDraft.threshold   = String(cfg.approval_threshold_percent ?? 60);
+  _adminDraft.minDur      = String(cfg.min_voting_duration        ?? 3600);
+  _adminDraft.maxDur      = String(cfg.max_voting_duration        ?? 2592000);
+  _adminDraft.stages      = String(cfg.max_dispute_stages         ?? 3);
+  _adminDraft.cooldown    = String(cfg.dispute_cooldown_seconds   ?? 3600);
+  _adminDraft.resubmit    = String(cfg.max_resubmissions          ?? 3);
+  _adminDraft.tokenAddr   = cfg.voting_token                      ?? '0x0000000000000000000000000000000000000000';
+  _adminDraft.minVote     = String(cfg.min_tokens_to_vote         ?? 0);
+  _adminDraft.minPropose  = String(cfg.min_tokens_to_propose      ?? 0);
+  _adminDraft.wlVote      = cfg.use_whitelist_for_voting          ?? false;
+  _adminDraft.wlPropose   = cfg.use_whitelist_for_proposing       ?? false;
+}
+
 /* ══════════════════════════════════════════════════════════
    UTILITIES
    ══════════════════════════════════════════════════════════ */
@@ -1106,13 +1170,22 @@ async function loadConstitution() {
   }
 }
 
-async function loadProposals(offset = 1, limit = 20) {
+async function loadProposals() {
   state.loading.proposals = true;
   try {
+    // contract: list_proposals is 1-based, oldest-first within the returned page.
+    // To always show newest proposals: fetch the LAST page by computing offset from proposal_count.
+    // If proposal_count is 0 or unknown, fall back to offset 1.
+    const limit = 20;
+    const total = state.config ? Number(state.config.proposal_count) : 0;
+    // offset of the last page: e.g. count=25 → offset=6, fetches #6-25 (newest 20)
+    const offset = total > limit ? total - limit + 1 : 1;
+
     const list = await readContract('list_proposals', [offset, limit]);
     if (Array.isArray(list)) {
-      state.proposals = list;
-      state.totalProposals = state.config ? Number(state.config.proposal_count) : list.length;
+      // Contract returns oldest-first within the page — reverse for newest-first feed display
+      state.proposals = list.slice().reverse();
+      state.totalProposals = total || list.length;
     }
   } catch (e) {
     console.warn('loadProposals:', e.message);
@@ -1384,7 +1457,7 @@ function updateWalletUI() {
    ══════════════════════════════════════════════════════════ */
 function navigate(page, id) {
   state.page = page;
-  const gen = ++state.renderGeneration;  // bump generation on every navigation
+  const gen = ++state.renderGeneration;
   if (id !== undefined) { state.detailId = id; state.currentProposal = null; }
 
   ['proposals','constitution','governance','admin','about'].forEach(p => {
@@ -1393,9 +1466,11 @@ function navigate(page, id) {
     if (tab) tab.classList.toggle('active', p === page);
   });
 
-  render();  // immediate render with skeleton / cached data
+  // Initialise admin draft from live config whenever user navigates TO admin panel
+  if (page === 'admin') resetAdminDraftFromConfig();
 
-  // Async detail load — only re-renders if user is still on same page/generation
+  render();
+
   if (page === 'detail' && id !== undefined) {
     loadProposal(id).then(() => {
       if (state.renderGeneration === gen) render();
@@ -1841,6 +1916,7 @@ async function handleAddAdmin(address) {
     cancelProgress();
     dismissToast(tid);
     showToast('Admin added', formatAddress(address), 'success', 4000);
+    _adminDraft.newAdmin = '';
     await loadAdmins();
     render();
   } catch (e) {
@@ -1906,6 +1982,7 @@ async function handleSetGovernanceParams(minQuorum, approvalThreshold, minDur, m
     dismissToast(tid);
     showToast('Governance params updated', '', 'success', 4000);
     await loadConfig();
+    resetAdminDraftFromConfig();
     render();
   } catch (e) {
     cancelProgress();
@@ -1927,6 +2004,7 @@ async function handleSetSafetyParams(maxDispute, cooldownSecs, maxResubmit) {
     dismissToast(tid);
     showToast('Safety params updated', '', 'success', 4000);
     await loadConfig();
+    resetAdminDraftFromConfig();
     render();
   } catch (e) {
     cancelProgress();
@@ -1948,6 +2026,7 @@ async function handleSetTokenRules(tokenAddr, minVote, minPropose) {
     dismissToast(tid);
     showToast('Token rules updated', '', 'success', 4000);
     await loadConfig();
+    resetAdminDraftFromConfig();
     render();
   } catch (e) {
     cancelProgress();
@@ -1969,6 +2048,7 @@ async function handleToggleWhitelist(voteWl, proposeWl) {
     dismissToast(tid);
     showToast('Whitelist settings updated', '', 'success', 4000);
     await loadConfig();
+    resetAdminDraftFromConfig();
     render();
   } catch (e) {
     cancelProgress();
@@ -1990,6 +2070,7 @@ async function handleManageWhitelist(userAddr, canVote, canPropose) {
     cancelProgress();
     dismissToast(tid);
     showToast('Whitelist updated', formatAddress(userAddr), 'success', 4000);
+    _adminDraft.wlAddr = '';
     await loadWhitelist();
     render();
   } catch (e) {
@@ -2497,7 +2578,7 @@ function renderAdmin() {
           <div style="margin-top:14px;padding-top:12px;border-top:.5px solid var(--border)">
             <div class="field-label mb-8">Add admin</div>
             <div class="field-hint" style="margin-bottom:8px">Address must be a valid 0x… wallet. Max ${cfg.max_admins||5} admins total.</div>
-            <input class="field-input" id="new-admin-input" placeholder="0x1234…abcd" style="margin-bottom:6px">
+            <input class="field-input" id="new-admin-input" placeholder="0x1234…abcd" value="${esc(_adminDraft.newAdmin||'')}" style="margin-bottom:6px">
             <button class="btn-secondary full-w" style="font-size:12px" onclick="handleAddAdmin(document.getElementById('new-admin-input').value)">+ Add admin</button>
           </div>
         </div>
@@ -2509,20 +2590,20 @@ function renderAdmin() {
         <div class="admin-card-body">
           <div class="field-hint" style="margin-bottom:12px">Changes take effect immediately after transaction confirms.</div>
           <div class="field">
-            <label class="field-label" for="ap-quorum">Min quorum <span class="field-hint">minimum votes for a valid result · currently ${cfg.min_quorum||10}</span></label>
-            <input class="field-input" id="ap-quorum" type="number" min="1" placeholder="e.g. 10" value="${cfg.min_quorum||10}">
+            <label class="field-label" for="ap-quorum">Min quorum <span class="field-hint">minimum votes for a valid result · on-chain: ${cfg.min_quorum||10}</span></label>
+            <input class="field-input" id="ap-quorum" type="number" min="1" placeholder="e.g. 10" value="${esc(_adminDraft.quorum ?? cfg.min_quorum ?? 10)}">
           </div>
           <div class="field">
-            <label class="field-label" for="ap-threshold">Approval threshold % <span class="field-hint">1–100 · currently ${cfg.approval_threshold_percent||60}%</span></label>
-            <input class="field-input" id="ap-threshold" type="number" min="1" max="100" placeholder="e.g. 60" value="${cfg.approval_threshold_percent||60}">
+            <label class="field-label" for="ap-threshold">Approval threshold % <span class="field-hint">1–100 · on-chain: ${cfg.approval_threshold_percent||60}%</span></label>
+            <input class="field-input" id="ap-threshold" type="number" min="1" max="100" placeholder="e.g. 60" value="${esc(_adminDraft.threshold ?? cfg.approval_threshold_percent ?? 60)}">
           </div>
           <div class="field">
-            <label class="field-label" for="ap-mindur">Min voting duration (seconds) <span class="field-hint">currently ${cfg.min_voting_duration||3600} = ${formatSeconds(cfg.min_voting_duration||3600)}</span></label>
-            <input class="field-input" id="ap-mindur" type="number" min="1" placeholder="e.g. 3600 (1 hour)" value="${cfg.min_voting_duration||3600}">
+            <label class="field-label" for="ap-mindur">Min voting duration (seconds) <span class="field-hint">on-chain: ${cfg.min_voting_duration||3600} = ${formatSeconds(cfg.min_voting_duration||3600)}</span></label>
+            <input class="field-input" id="ap-mindur" type="number" min="1" placeholder="e.g. 3600 (1 hour)" value="${esc(_adminDraft.minDur ?? cfg.min_voting_duration ?? 3600)}">
           </div>
           <div class="field">
-            <label class="field-label" for="ap-maxdur">Max voting duration (seconds) <span class="field-hint">must exceed min · currently ${cfg.max_voting_duration||2592000} = ${formatSeconds(cfg.max_voting_duration||2592000)}</span></label>
-            <input class="field-input" id="ap-maxdur" type="number" min="1" placeholder="e.g. 2592000 (30 days)" value="${cfg.max_voting_duration||2592000}">
+            <label class="field-label" for="ap-maxdur">Max voting duration (seconds) <span class="field-hint">must exceed min · on-chain: ${cfg.max_voting_duration||2592000} = ${formatSeconds(cfg.max_voting_duration||2592000)}</span></label>
+            <input class="field-input" id="ap-maxdur" type="number" min="1" placeholder="e.g. 2592000 (30 days)" value="${esc(_adminDraft.maxDur ?? cfg.max_voting_duration ?? 2592000)}">
           </div>
           <button class="btn-primary full-w" style="margin-top:8px" onclick="(() => {
             const q=parseInt($('ap-quorum').value), t=parseInt($('ap-threshold').value),
@@ -2542,16 +2623,16 @@ function renderAdmin() {
         <div class="admin-card-body">
           <div class="field-hint" style="margin-bottom:12px">Controls dispute and revision limits across all proposals.</div>
           <div class="field">
-            <label class="field-label" for="sp-stages">Max dispute stages <span class="field-hint">AI re-evaluations per proposal · currently ${cfg.max_dispute_stages||3}</span></label>
-            <input class="field-input" id="sp-stages" type="number" min="1" placeholder="e.g. 3" value="${cfg.max_dispute_stages||3}">
+            <label class="field-label" for="sp-stages">Max dispute stages <span class="field-hint">AI re-evaluations per proposal · on-chain: ${cfg.max_dispute_stages||3}</span></label>
+            <input class="field-input" id="sp-stages" type="number" min="1" placeholder="e.g. 3" value="${esc(_adminDraft.stages ?? cfg.max_dispute_stages ?? 3)}">
           </div>
           <div class="field">
-            <label class="field-label" for="sp-cooldown">Dispute cooldown (seconds) <span class="field-hint">wait between dispute stages · currently ${cfg.dispute_cooldown_seconds||3600} = ${formatSeconds(cfg.dispute_cooldown_seconds||3600)}</span></label>
-            <input class="field-input" id="sp-cooldown" type="number" min="1" placeholder="e.g. 3600 (1 hour)" value="${cfg.dispute_cooldown_seconds||3600}">
+            <label class="field-label" for="sp-cooldown">Dispute cooldown (seconds) <span class="field-hint">wait between dispute stages · on-chain: ${cfg.dispute_cooldown_seconds||3600} = ${formatSeconds(cfg.dispute_cooldown_seconds||3600)}</span></label>
+            <input class="field-input" id="sp-cooldown" type="number" min="1" placeholder="e.g. 3600 (1 hour)" value="${esc(_adminDraft.cooldown ?? cfg.dispute_cooldown_seconds ?? 3600)}">
           </div>
           <div class="field">
-            <label class="field-label" for="sp-resubmit">Max resubmissions <span class="field-hint">revisions allowed per proposal · currently ${cfg.max_resubmissions||3}</span></label>
-            <input class="field-input" id="sp-resubmit" type="number" min="1" placeholder="e.g. 3" value="${cfg.max_resubmissions||3}">
+            <label class="field-label" for="sp-resubmit">Max resubmissions <span class="field-hint">revisions allowed per proposal · on-chain: ${cfg.max_resubmissions||3}</span></label>
+            <input class="field-input" id="sp-resubmit" type="number" min="1" placeholder="e.g. 3" value="${esc(_adminDraft.resubmit ?? cfg.max_resubmissions ?? 3)}">
           </div>
           <button class="btn-primary full-w" style="margin-top:8px" onclick="(() => {
             const st=parseInt($('sp-stages').value), cd=parseInt($('sp-cooldown').value), rs=parseInt($('sp-resubmit').value);
@@ -2570,15 +2651,15 @@ function renderAdmin() {
           <div class="field-hint" style="margin-bottom:12px">Set ERC-20 or NFT token address and minimum balances required to vote or propose. Use the zero address to disable token gating.</div>
           <div class="field">
             <label class="field-label" for="tr-token">Token contract address <span class="field-hint">ERC-20 or NFT · zero address = no token gate</span></label>
-            <input class="field-input" id="tr-token" type="text" placeholder="0x0000…0000 (zero = none)" value="${esc(cfg.voting_token||'0x0000000000000000000000000000000000000000')}">
+            <input class="field-input" id="tr-token" type="text" placeholder="0x0000…0000 (zero = none)" value="${esc(_adminDraft.tokenAddr ?? cfg.voting_token ?? '0x0000000000000000000000000000000000000000')}">
           </div>
           <div class="field">
-            <label class="field-label" for="tr-minvote">Min tokens to vote <span class="field-hint">0 = no minimum · currently ${cfg.min_tokens_to_vote||0}</span></label>
-            <input class="field-input" id="tr-minvote" type="number" min="0" placeholder="e.g. 100" value="${cfg.min_tokens_to_vote||0}">
+            <label class="field-label" for="tr-minvote">Min tokens to vote <span class="field-hint">0 = no minimum · on-chain: ${cfg.min_tokens_to_vote||0}</span></label>
+            <input class="field-input" id="tr-minvote" type="number" min="0" placeholder="e.g. 100" value="${esc(_adminDraft.minVote ?? cfg.min_tokens_to_vote ?? 0)}">
           </div>
           <div class="field">
-            <label class="field-label" for="tr-minpropose">Min tokens to propose <span class="field-hint">0 = no minimum · currently ${cfg.min_tokens_to_propose||0}</span></label>
-            <input class="field-input" id="tr-minpropose" type="number" min="0" placeholder="e.g. 1000" value="${cfg.min_tokens_to_propose||0}">
+            <label class="field-label" for="tr-minpropose">Min tokens to propose <span class="field-hint">0 = no minimum · on-chain: ${cfg.min_tokens_to_propose||0}</span></label>
+            <input class="field-input" id="tr-minpropose" type="number" min="0" placeholder="e.g. 1000" value="${esc(_adminDraft.minPropose ?? cfg.min_tokens_to_propose ?? 0)}">
           </div>
           <button class="btn-primary full-w" style="margin-top:8px" onclick="(() => {
             const tok=$('tr-token').value.trim(), mv=parseInt($('tr-minvote').value), mp=parseInt($('tr-minpropose').value);
@@ -2618,11 +2699,11 @@ function renderAdmin() {
           <div class="field-hint" style="margin-bottom:12px">Toggle whether whitelists are enforced, then manage individual addresses below.</div>
           <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">
             <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
-              <input type="checkbox" id="wl-vote" ${cfg.use_whitelist_for_voting?'checked':''} style="width:16px;height:16px;accent-color:var(--violet-500)">
+              <input type="checkbox" id="wl-vote" ${(_adminDraft.wlVote ?? cfg.use_whitelist_for_voting) ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--violet-500)">
               Voting whitelist active
             </label>
             <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
-              <input type="checkbox" id="wl-propose" ${cfg.use_whitelist_for_proposing?'checked':''} style="width:16px;height:16px;accent-color:var(--violet-500)">
+              <input type="checkbox" id="wl-propose" ${(_adminDraft.wlPropose ?? cfg.use_whitelist_for_proposing) ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--violet-500)">
               Proposing whitelist active
             </label>
           </div>
@@ -2630,10 +2711,10 @@ function renderAdmin() {
 
           <div style="border-top:.5px solid var(--border);padding-top:14px">
             <div class="field-label mb-8">Add / update address</div>
-            <input class="field-input" id="wl-addr" placeholder="0x… wallet address" style="margin-bottom:6px">
+            <input class="field-input" id="wl-addr" placeholder="0x… wallet address" value="${esc(_adminDraft.wlAddr||'')}" style="margin-bottom:6px">
             <div style="display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap">
-              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="wl-canvote" checked style="accent-color:var(--violet-500)"> Can vote</label>
-              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="wl-canpropose" checked style="accent-color:var(--violet-500)"> Can propose</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="wl-canvote" ${_adminDraft.wlCanVote!==false?'checked':''} style="accent-color:var(--violet-500)"> Can vote</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="wl-canpropose" ${_adminDraft.wlCanPropose!==false?'checked':''} style="accent-color:var(--violet-500)"> Can propose</label>
             </div>
             <button class="btn-secondary full-w" style="font-size:12px" onclick="handleManageWhitelist($('wl-addr').value,$('wl-canvote').checked,$('wl-canpropose').checked)">Add / update address</button>
           </div>
@@ -2765,7 +2846,7 @@ function renderAbout() {
           ['GenLayer Documentation', 'https://docs.genlayer.com'],
           ['GenLayer Studio', 'https://studio.genlayer.com'],
           ['genlayer-js SDK', 'https://github.com/genlayerlabs/genlayer-js'],
-          ['Contract source', 'https://github.com/YOUR_USERNAME/govlayer/blob/main/contract/govlayer_v4.py'],
+          ['Contract source', 'https://github.com/betheanalyst/govlayer/blob/main/contract/govlayer.py'],
         ].map(([label, href]) => `<a href="${href}" target="_blank" rel="noopener" style="padding:8px 14px;background:var(--surface-card);border:.5px solid var(--border);border-radius:7px;font-size:13px;color:var(--text-primary);transition:border-color var(--dur-fast);display:inline-flex;align-items:center;gap:5px" onmouseover="this.style.borderColor='var(--ink-300)'" onmouseout="this.style.borderColor='var(--border)'">${label} ↗</a>`).join('')}
       </div>
 
@@ -2779,6 +2860,8 @@ function renderAbout() {
 function render() {
   const body = $('page-body');
   if (!body) return;
+  // Snapshot admin form values before DOM replacement — preserves user input across polling re-renders
+  syncAdminDraftFromDOM();
   try {
     let html = '';
     switch (state.page) {
