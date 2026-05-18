@@ -779,11 +779,15 @@ input, textarea, select { font-family: inherit; }
 
 <!-- genlayer-js SDK — loaded as ESM module, stored on window for access by main script -->
 <script type="module">
-  import { createClient, createAccount } from 'https://esm.sh/genlayer-js@1.1.8';
-  import { TransactionStatus } from 'https://esm.sh/genlayer-js@1.1.8/types';
-  window._GL = { createClient, createAccount, TransactionStatus };
-  // Signal that SDK is ready
-  window.dispatchEvent(new Event('gl-sdk-ready'));
+  try {
+    const { createClient, createAccount } = await import('https://esm.sh/genlayer-js@1.1.8');
+    const { TransactionStatus } = await import('https://esm.sh/genlayer-js@1.1.8/types');
+    window._GL = { createClient, createAccount, TransactionStatus };
+  } catch(e) {
+    window._GL_ERROR = e.message || 'SDK failed to load';
+  }
+  // Signal that SDK module settled (success or failure)
+  window.dispatchEvent(new CustomEvent('gl-sdk-ready', { detail: { ok: !!window._GL } }));
 </script>
 
 <script>
@@ -819,7 +823,7 @@ const state = {
   isAdmin:         false,
   currentProposal: null,
   detailId:        null,
-  loading:         { proposals: true, detail: false, config: true },
+  loading:         { proposals: true, detail: false, config: true, sdk: true },
   totalProposals:  0,
   historyCount:    0,
   filters:         { proposals: 'active' },
@@ -830,6 +834,7 @@ const state = {
   pollingTimers:   {},
   historyPage:     { offset: 1, limit: 20 },
   proposalPage:    { offset: 1, limit: 20 },
+  renderGeneration: 0,
 };
 
 /* ══════════════════════════════════════════════════════════
@@ -912,20 +917,31 @@ function mapError(raw) {
 
 /* ══════════════════════════════════════════════════════════
    GENLAYER-JS SDK CLIENT
-   SDK loaded via ESM module above, stored on window._GL.
-   API confirmed from working reference implementation:
-     readContract  → { address, functionName, args }
-     writeContract → { account, address, functionName, args, value: 0n }
-     waitForTransactionReceipt → { hash, status: TransactionStatus.ACCEPTED }
-   Transactions on Studionet typically take 1–4 minutes.
-   Retry loop: 60 attempts × 5s = up to 5 minutes.
+   SDK loaded via ESM module above (top-level await), stored on window._GL.
+   API: readContract  → { address, functionName, args }
+        writeContract → { account, address, functionName, args, value: 0n }
+        waitForTransactionReceipt → { hash, status: TransactionStatus.ACCEPTED }
+   Transactions on Studionet: 1–4 min (standard); 2–5 min (AI-heavy).
+   Poll loop: 72 attempts × 5s = up to 6 minutes. No double-decrement.
    ══════════════════════════════════════════════════════════ */
 
 let _glClient = null;
-let _sdkReady = false;
 
-// Wait for the ESM module to finish loading
-window.addEventListener('gl-sdk-ready', () => { _sdkReady = true; });
+/* Wait for the ESM module's top-level await to complete.
+   Returns immediately if already loaded. Rejects after timeoutMs. */
+function waitForSDK(timeoutMs = 15000) {
+  if (window._GL) return Promise.resolve();
+  if (window._GL_ERROR) return Promise.reject(new Error('SDK load failed: ' + window._GL_ERROR));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() =>
+      reject(new Error('GenLayer SDK did not load within 15s. Check your network and refresh.')), timeoutMs);
+    window.addEventListener('gl-sdk-ready', (e) => {
+      clearTimeout(timer);
+      if (e.detail && e.detail.ok) resolve();
+      else reject(new Error('SDK load failed: ' + (window._GL_ERROR || 'unknown error')));
+    }, { once: true });
+  });
+}
 
 function getSDK() {
   if (!window._GL) throw new Error('GenLayer SDK not loaded. Please refresh the page.');
@@ -941,35 +957,37 @@ function getClient() {
 
 async function readContract(fn, args = []) {
   const client = getClient();
-  let retries = 3;
-  while (retries > 0) {
+  const maxAttempts = 3;
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const result = await client.readContract({
+      return await client.readContract({
         address:      CONFIG.CONTRACT_ADDRESS,
         functionName: fn,
         args:         args,
       });
-      return result;
     } catch (err) {
+      lastErr = err;
       const retryable = err.message && (
         err.message.includes('fetch') ||
         err.message.includes('network') ||
         err.message.includes('timeout') ||
         err.message.includes('Failed to fetch')
       );
-      if (retryable && retries > 1) {
-        await new Promise(r => setTimeout(r, 2000));
-        retries--;
-      } else {
-        throw err;
-      }
+      if (!retryable || attempt === maxAttempts - 1) throw err;
+      await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
     }
   }
+  throw lastErr;
 }
+
+/* ── In-flight guard — prevents duplicate write submissions ──────────────── */
+const _inFlight = new Set();
 
 async function writeContract(fn, args = []) {
   if (!state.wallet) throw new Error('Wallet not connected');
   if (!state.account)  throw new Error('Account not initialised');
+
   const client = getClient();
   const { TransactionStatus } = getSDK();
 
@@ -982,12 +1000,12 @@ async function writeContract(fn, args = []) {
     value:        0n,
   });
 
-  // Brief pause so the RPC indexes the tx
-  await new Promise(r => setTimeout(r, 2000));
+  // Initial pause for RPC indexing
+  await new Promise(r => setTimeout(r, 3000));
 
-  // Poll for receipt — 60 retries × 5s = up to 5 minutes
-  let retries = 60;
-  while (retries > 0) {
+  // Poll for receipt — 72 × 5s = 6 minutes max, single-decrement, no race
+  const maxAttempts = 72;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const receipt = await client.waitForTransactionReceipt({
         hash,
@@ -995,26 +1013,53 @@ async function writeContract(fn, args = []) {
       });
       if (receipt) return receipt;
     } catch (err) {
-      const retryable = err.message && (
+      const isNotReady = err.message && (
         err.message.includes('not found') ||
-        err.message.includes('fetch') ||
-        err.message.includes('network') ||
-        err.message.includes('timeout') ||
-        err.message.includes('unknown') ||
+        err.message.includes('pending')  ||
+        err.message.includes('unknown')  ||
+        err.message.includes('fetch')    ||
+        err.message.includes('network')  ||
+        err.message.includes('timeout')  ||
         err.message.includes('failed')
       );
-      if (retryable && retries > 1) {
-        const delay = err.message.includes('fetch') ? 5000 : 3000;
-        await new Promise(r => setTimeout(r, delay));
-        retries--;
-      } else {
-        throw err;
-      }
+      // Only hard-throw on final attempt or non-retryable errors
+      if (!isNotReady || attempt === maxAttempts - 1) throw err;
     }
-    retries--;
     await new Promise(r => setTimeout(r, 5000));
   }
-  throw new Error('Transaction timed out after 5 minutes. Check governance history for the outcome.');
+  throw new Error(
+    'Transaction is taking longer than expected (6 min). ' +
+    'Check Governance History — it may have finalized. Hash: ' + hash
+  );
+}
+
+/* Progressive toast updater for long-running writes.
+   Returns a cancel function to stop updates. */
+function startTxProgress(tid, isAiHeavy) {
+  const milestones = isAiHeavy
+    ? [
+        [0,    'Transaction submitted to chain…'],
+        [25,   'Awaiting validator consensus…'],
+        [80,   'AI evaluation running — may take 2–5 min'],
+        [200,  'Validators deliberating — still in progress…'],
+        [300,  'Still processing. GenLayer consensus can take up to 6 min.'],
+      ]
+    : [
+        [0,    'Transaction submitted…'],
+        [30,   'Awaiting validator consensus…'],
+        [90,   'Confirming on chain — almost there…'],
+        [210,  'Still in progress — GenLayer consensus can take up to 6 min.'],
+      ];
+
+  let i = 0;
+  const timers = [];
+  milestones.forEach(([secs, msg]) => {
+    timers.push(setTimeout(() => {
+      const el = document.getElementById(`toast-sub-${tid}`);
+      if (el) el.textContent = msg;
+    }, secs * 1000));
+  });
+  return () => timers.forEach(clearTimeout);
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1097,7 +1142,8 @@ async function loadProposal(id) {
 async function loadHistory(offset = 0, limit = 20) {
   try {
     const hist = await readContract('get_governance_history', [offset, limit]);
-    if (Array.isArray(hist)) state.history = hist;
+    // Contract returns oldest-first (chronological append); reverse for newest-first display
+    if (Array.isArray(hist)) state.history = hist.slice().reverse();
   } catch (e) {
     console.warn('loadHistory:', e.message);
   }
@@ -1122,10 +1168,16 @@ async function loadWhitelist() {
 }
 
 async function initData() {
-  // Show skeleton while loading
   render();
-  // Check network first
-  const cfg = await checkNetwork();
+
+  // Check network — up to 3 attempts with backoff (eliminates manual Retry on first load)
+  let cfg = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    cfg = await checkNetwork();
+    if (cfg) break;
+    if (attempt < 2) await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+  }
+
   if (!cfg) {
     state.networkOk = false;
     state.loading.proposals = false;
@@ -1136,7 +1188,7 @@ async function initData() {
   state.config = cfg;
   state.loading.config = false;
 
-  // Parallel load
+  // Parallel load of all baseline data
   await Promise.all([
     loadAdmins(),
     loadConstitution(),
@@ -1144,7 +1196,15 @@ async function initData() {
     loadHistory(),
   ]);
 
-  if (state.isAdmin) {
+  // Fix 7: resolve admin status AFTER admins are loaded (handles page refresh with wallet connected)
+  if (state.wallet) {
+    const wasAdmin = state.isAdmin;
+    state.isAdmin = state.admins.some(a => a.toLowerCase() === state.wallet);
+    if (state.isAdmin && !wasAdmin) {
+      await Promise.all([loadPendingActions(), loadWhitelist()]);
+    }
+  } else if (state.isAdmin) {
+    // Already set (won't happen on fresh load, but guard)
     await Promise.all([loadPendingActions(), loadWhitelist()]);
   }
 
@@ -1324,6 +1384,7 @@ function updateWalletUI() {
    ══════════════════════════════════════════════════════════ */
 function navigate(page, id) {
   state.page = page;
+  const gen = ++state.renderGeneration;  // bump generation on every navigation
   if (id !== undefined) { state.detailId = id; state.currentProposal = null; }
 
   ['proposals','constitution','governance','admin','about'].forEach(p => {
@@ -1332,12 +1393,15 @@ function navigate(page, id) {
     if (tab) tab.classList.toggle('active', p === page);
   });
 
-  // Load detail data on navigation
+  render();  // immediate render with skeleton / cached data
+
+  // Async detail load — only re-renders if user is still on same page/generation
   if (page === 'detail' && id !== undefined) {
-    loadProposal(id).then(() => render());
+    loadProposal(id).then(() => {
+      if (state.renderGeneration === gen) render();
+    });
   }
 
-  render();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1353,7 +1417,8 @@ function showToast(label, sub, type = 'info', duration = 5000) {
     : `<div class="toast-dot" style="${dotColors[type]||dotColors.info}" aria-hidden="true"></div>`;
   const el = document.createElement('div');
   el.className = 'toast'; el.id = `toast-${id}`; el.setAttribute('role','status');
-  el.innerHTML = `${indicator}<div class="toast-info"><div class="toast-label">${esc(label)}</div>${sub?`<div class="toast-sub">${esc(sub)}</div>`:''}</div><button class="toast-dismiss" onclick="dismissToast(${id})" aria-label="Dismiss">×</button>`;
+  // toast-sub gets an id so startTxProgress can update it in-place
+  el.innerHTML = `${indicator}<div class="toast-info"><div class="toast-label">${esc(label)}</div>${sub?`<div class="toast-sub" id="toast-sub-${id}">${esc(sub)}</div>`:`<div class="toast-sub" id="toast-sub-${id}" style="display:none"></div>`}</div><button class="toast-dismiss" onclick="dismissToast(${id})" aria-label="Dismiss">×</button>`;
   container.appendChild(el);
   if (duration > 0) setTimeout(() => dismissToast(id), duration);
   return id;
@@ -1395,11 +1460,13 @@ function timerHtml(votingEnd, p) {
 }
 
 function voteBarHtml(p, mini = false) {
-  const total = Number(p.votes_yes||0) + Number(p.votes_no||0);
-  const yesP = total > 0 ? Math.round((Number(p.votes_yes)/total)*100) : 0;
-  const noP  = total > 0 ? Math.round((Number(p.votes_no)/total)*100)  : 0;
-  const thr  = Number(state.config?.approval_threshold_percent||60);
-  const qm   = Number(state.config?.min_quorum||10);
+  const yr    = Number(p.votes_yes || 0);
+  const nr    = Number(p.votes_no  || 0);
+  const total = yr + nr;
+  const yesP = total > 0 ? Math.round((yr / total) * 100) : 0;
+  const noP  = total > 0 ? Math.round((nr / total) * 100) : 0;
+  const thr  = Number(state.config?.approval_threshold_percent || 60);
+  const qm   = Number(state.config?.min_quorum || 10);
 
   if (mini) return `<div class="mini-bar-wrap" role="img" aria-label="${yesP}% for, ${noP}% against"><div class="mini-bar-yes" style="width:${yesP}%"></div><div class="mini-bar-no" style="width:${noP}%"></div></div>`;
 
@@ -1521,15 +1588,27 @@ function actionSidebarHtml(p) {
     const maxStages = Number(cfg.max_dispute_stages||3);
     const cooldown  = Number(cfg.dispute_cooldown_seconds||3600);
     const count     = Number(p.dispute_count||0);
-    if (count < maxStages && state.wallet) {
-      const lastAt = Number(p.last_dispute_at||0);
-      const elapsed = Math.floor(Date.now()/1000) - lastAt;
-      if (lastAt === 0 || elapsed >= cooldown) {
-        actionsHtml += `<button class="btn-secondary full-w mt-8" onclick="navigate('dispute-form',${p.id})">Raise a dispute</button>`;
+    // Contract access control: only proposer, a voter on this proposal, or admin can raise dispute
+    const isVoter = state.wallet && state.userVotes[p.id] !== undefined;
+    const canDispute = state.wallet && (isProposer || isVoter || state.isAdmin);
+
+    if (count < maxStages) {
+      if (!state.wallet) {
+        actionsHtml += `<div class="mt-8 connect-prompt"><div class="t-small mb-8">Connect wallet to raise a dispute</div><button class="btn-primary full-w" onclick="connectWallet()">Connect wallet</button></div>`;
+      } else if (!canDispute) {
+        actionsHtml += `<div class="mt-8" style="font-size:12px;color:var(--text-tertiary);padding:8px 0">Only the proposer, a voter on this proposal, or an admin can raise a dispute.</div>`;
       } else {
-        const unlockAt = lastAt + cooldown;
-        actionsHtml += `<div class="mt-8"><span class="timer cooldown">Next dispute in ${formatCountdown(unlockAt)}</span></div>`;
+        const lastAt = Number(p.last_dispute_at||0);
+        const elapsed = Math.floor(Date.now()/1000) - lastAt;
+        if (lastAt === 0 || elapsed >= cooldown) {
+          actionsHtml += `<button class="btn-secondary full-w mt-8" onclick="navigate('dispute-form',${p.id})">Raise a dispute</button>`;
+        } else {
+          const unlockAt = lastAt + cooldown;
+          actionsHtml += `<div class="mt-8"><span class="timer cooldown">Next dispute in ${formatCountdown(unlockAt)}</span></div>`;
+        }
       }
+    } else if (count >= maxStages) {
+      actionsHtml += `<div class="mt-8" style="font-size:12px;color:var(--text-tertiary)">Maximum dispute stages (${maxStages}) reached.</div>`;
     }
   }
 
@@ -1559,108 +1638,152 @@ function actionSidebarHtml(p) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   WRITE HANDLERS — connected to live contract
+   WRITE HANDLERS — in-flight guards + progressive toasts
    ══════════════════════════════════════════════════════════ */
+
 async function handleVote(proposalId, support) {
   if (!state.wallet) { showToast('Wallet not connected','','error',3000); return; }
-  const tid = showToast('Submitting vote…','GenLayer transactions take 1–4 minutes to confirm','pending',0);
+  const key = `vote-${proposalId}`;
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Submitting vote…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
   try {
     await writeContract('vote', [Number(proposalId), support]);
+    cancelProgress();
     state.userVotes[proposalId] = support;
     dismissToast(tid);
-    showToast(`Vote recorded`,`You voted ${support?'for':'against'} proposal #${proposalId}`,'success',4000);
+    showToast(`Vote recorded`, `You voted ${support ? 'for' : 'against'} proposal #${proposalId}`, 'success', 4000);
     await loadProposal(proposalId);
     render();
   } catch (e) {
+    cancelProgress();
     dismissToast(tid);
-    showToast('Vote failed', mapError(e.message),'error',6000);
-  }
+    showToast('Vote failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
 }
 
 async function handleFinalize(proposalId) {
-  const tid = showToast('Finalizing…','Recording outcome — this may take 1–4 minutes','pending',0);
+  const key = `finalize-${proposalId}`;
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Closing vote…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
   try {
     await writeContract('finalize_decision', [Number(proposalId)]);
+    cancelProgress();
     dismissToast(tid);
-    showToast('Outcome recorded',`Proposal #${proposalId} finalized`,'success',4000);
+    showToast('Outcome recorded', `Proposal #${proposalId} finalized`, 'success', 4000);
     await loadProposal(proposalId);
     render();
   } catch (e) {
+    cancelProgress();
     dismissToast(tid);
-    showToast('Finalization failed', mapError(e.message),'error',6000);
-  }
+    showToast('Finalization failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
 }
 
 async function handleCancel(proposalId) {
   if (!confirm('Cancel this proposal? This cannot be undone.')) return;
-  const tid = showToast('Cancelling…','Waiting for confirmation (1–4 min)','pending',0);
+  const key = `cancel-${proposalId}`;
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Cancelling…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
   try {
     await writeContract('cancel_proposal', [Number(proposalId)]);
+    cancelProgress();
     dismissToast(tid);
-    showToast('Proposal cancelled',`Proposal #${proposalId} has been cancelled`,'success',4000);
+    showToast('Proposal cancelled', `Proposal #${proposalId} has been cancelled`, 'success', 4000);
     await loadProposals();
     navigate('proposals');
   } catch (e) {
+    cancelProgress();
     dismissToast(tid);
-    showToast('Failed', mapError(e.message),'error',6000);
-  }
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
 }
 
 async function handleConfirmConstitution(proposalId) {
   if (!confirm('Apply this constitutional amendment? This will update the governing constitution.')) return;
-  const tid = showToast('Confirming amendment…','Applying to chain — this may take 1–4 minutes','pending',0);
+  const key = `confirm-constitution-${proposalId}`;
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Confirming amendment…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
   try {
     await writeContract('confirm_constitution_update', [Number(proposalId)]);
+    cancelProgress();
     dismissToast(tid);
-    showToast('Constitution updated','The new constitution has been applied','success',5000);
+    showToast('Constitution updated', 'The new constitution has been applied', 'success', 5000);
     await Promise.all([loadConstitution(), loadProposal(proposalId)]);
     render();
   } catch (e) {
+    cancelProgress();
     dismissToast(tid);
-    showToast('Failed', mapError(e.message),'error',6000);
-  }
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
 }
 
 async function handleApproveAction(actionId) {
-  const tid = showToast('Approving…','Executing multisig action (1–4 min)','pending',0);
+  const key = `approve-action-${actionId}`;
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Approving…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
   try {
     await writeContract('approve_admin_action', [String(actionId)]);
+    cancelProgress();
     dismissToast(tid);
-    showToast('Action executed',`Multisig action #${actionId} approved`,'success',4000);
-    await Promise.all([loadPendingActions(), loadAdmins()]);
+    showToast('Action executed', `Multisig action #${actionId} approved and executed`, 'success', 4000);
+    await Promise.all([loadPendingActions(), loadAdmins(), loadConfig()]);
     updateWalletUI();
     render();
   } catch (e) {
+    cancelProgress();
     dismissToast(tid);
-    showToast('Failed', mapError(e.message),'error',6000);
-  }
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
 }
 
 async function handleSubmitDispute(proposalId, reason) {
-  if (!reason || !reason.trim()) { showToast('Reason required','Explain why you are disputing','error',4000); return; }
-  const tid = showToast('Raising dispute…','AI panel review running — may take 2–5 minutes','pending',0);
+  if (!reason || !reason.trim()) { showToast('Reason required', 'Explain why you are disputing', 'error', 4000); return; }
+  const key = `dispute-${proposalId}`;
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  // Dispute triggers AI: ai-heavy progress milestones
+  const tid = showToast('Raising dispute…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, true);
   try {
     await writeContract('raise_dispute', [Number(proposalId), reason.trim()]);
+    cancelProgress();
     dismissToast(tid);
-    showToast('Dispute raised',`Stage dispute submitted for proposal #${proposalId}`,'success',4000);
+    showToast('Dispute raised', `AI re-evaluation submitted for proposal #${proposalId}`, 'success', 4000);
     await loadProposal(proposalId);
     navigate('detail', proposalId);
   } catch (e) {
+    cancelProgress();
     dismissToast(tid);
-    showToast('Failed', mapError(e.message),'error',6000);
-  }
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
 }
 
 async function handleSubmitProposal() {
   const form = state.createForm;
-  if (!state.wallet) { showToast('Wallet not connected','Connect to submit proposals','error',3000); return; }
-  if (!form.title.trim()) { showToast('Title required','','error',3000); return; }
-  if (!form.description.trim()) { showToast('Description required','','error',3000); return; }
-  if (!form.duration) { showToast('Duration required','','error',3000); return; }
-  if (form.type === 'constitution_update' && !state.isAdmin) { showToast('Admin required','Only admins can submit constitution updates','error',4000); return; }
-  if (form.type === 'constitution_update' && !form.proposed_constitution.trim()) { showToast('Constitution text required','','error',3000); return; }
+  if (!state.wallet) { showToast('Wallet not connected', 'Connect to submit proposals', 'error', 3000); return; }
+  if (!form.title.trim()) { showToast('Title required', '', 'error', 3000); return; }
+  if (!form.description.trim()) { showToast('Description required', '', 'error', 3000); return; }
+  if (!form.duration) { showToast('Duration required', '', 'error', 3000); return; }
+  if (form.type === 'constitution_update' && !state.isAdmin) { showToast('Admin required', 'Only admins can submit constitution updates', 'error', 4000); return; }
+  if (form.type === 'constitution_update' && !form.proposed_constitution.trim()) { showToast('Constitution text required', '', 'error', 3000); return; }
 
-  const tid = showToast('Submitting…','AI audit running — proposal submission takes 2–5 minutes on Studionet','pending',0);
+  const key = 'submit-proposal';
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+
+  // Proposal submission is AI-heavy (runs audit)
+  const tid = showToast('Submitting proposal…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, true);
   try {
     await writeContract('submit_proposal', [
       form.title.trim(),
@@ -1669,60 +1792,233 @@ async function handleSubmitProposal() {
       form.type,
       form.proposed_constitution.trim(),
     ]);
+    cancelProgress();
     dismissToast(tid);
-    showToast('Proposal submitted','AI audit complete — check proposal status','success',5000);
-    state.createForm = { title:'', description:'', type:'standard', duration:86400, proposed_constitution:'' };
+    showToast('Proposal submitted', 'AI audit complete — your proposal is now live', 'success', 5000);
+    state.createForm = { title: '', description: '', type: 'standard', duration: 86400, proposed_constitution: '' };
+    // Fix 3: reload config to get updated proposal_count, then reload proposals
+    await loadConfig();
     await loadProposals();
     navigate('proposals');
   } catch (e) {
+    cancelProgress();
     dismissToast(tid);
-    showToast('Submission failed', mapError(e.message),'error',7000);
-  }
+    showToast('Submission failed', mapError(e.message), 'error', 7000);
+  } finally { _inFlight.delete(key); }
 }
 
 async function handleResubmit(proposalId, newDescription) {
-  if (!newDescription || !newDescription.trim()) { showToast('Description required','','error',3000); return; }
-  const tid = showToast('Resubmitting…','AI re-audit running — may take 2–5 minutes','pending',0);
+  if (!newDescription || !newDescription.trim()) { showToast('Description required', '', 'error', 3000); return; }
+  const key = `resubmit-${proposalId}`;
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  // Resubmit triggers AI re-audit
+  const tid = showToast('Resubmitting…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, true);
   try {
     await writeContract('resubmit_proposal', [Number(proposalId), newDescription.trim()]);
+    cancelProgress();
     dismissToast(tid);
-    showToast('Resubmitted','AI re-audit complete','success',4000);
+    showToast('Resubmitted', 'AI re-audit complete — check proposal status', 'success', 4000);
     await loadProposal(proposalId);
     navigate('detail', proposalId);
   } catch (e) {
+    cancelProgress();
     dismissToast(tid);
-    showToast('Failed', mapError(e.message),'error',6000);
-  }
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
 }
 
 async function handleAddAdmin(address) {
-  if (!address.trim()) { showToast('Address required','','error',3000); return; }
-  const tid = showToast('Adding admin…','Waiting for confirmation (1–4 min)','pending',0);
+  if (!address || !address.trim()) { showToast('Address required', '', 'error', 3000); return; }
+  const key = 'add-admin';
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Adding admin…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
   try {
     await writeContract('add_admin', [address.trim().toLowerCase()]);
+    cancelProgress();
     dismissToast(tid);
-    showToast('Admin added',formatAddress(address),'success',4000);
+    showToast('Admin added', formatAddress(address), 'success', 4000);
     await loadAdmins();
     render();
   } catch (e) {
+    cancelProgress();
     dismissToast(tid);
-    showToast('Failed', mapError(e.message),'error',6000);
-  }
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
+}
+
+/* Direct remove_admin — available when 3+ admins; uses multisig path when 2 admins */
+async function handleDirectRemoveAdmin(address) {
+  if (!confirm(`Remove admin ${formatAddress(address)}? This cannot be undone.`)) return;
+  const key = `remove-admin-${address}`;
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Removing admin…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
+  try {
+    await writeContract('remove_admin', [address.toLowerCase()]);
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Admin removed', formatAddress(address), 'success', 4000);
+    await loadAdmins();
+    render();
+  } catch (e) {
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
 }
 
 async function handleProposeAdminAction(actionType, params) {
-  const tid = showToast('Proposing action…','Submitting to chain (1–4 min)','pending',0);
+  const key = `propose-admin-${actionType}`;
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Proposing action…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
   try {
     await writeContract('propose_admin_action', [actionType, JSON.stringify(params)]);
+    cancelProgress();
     dismissToast(tid);
-    showToast('Action proposed','A second admin must approve within 24h','success',5000);
+    showToast('Action proposed', 'A second admin must approve within 24 hours', 'success', 5000);
     await loadPendingActions();
     updateWalletUI();
     render();
   } catch (e) {
+    cancelProgress();
     dismissToast(tid);
-    showToast('Failed', mapError(e.message),'error',6000);
-  }
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
+}
+
+/* Admin: set_governance_params */
+async function handleSetGovernanceParams(minQuorum, approvalThreshold, minDur, maxDur) {
+  const key = 'set-gov-params';
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Updating governance params…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
+  try {
+    await writeContract('set_governance_params', [Number(minQuorum), Number(approvalThreshold), Number(minDur), Number(maxDur)]);
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Governance params updated', '', 'success', 4000);
+    await loadConfig();
+    render();
+  } catch (e) {
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
+}
+
+/* Admin: set_safety_params */
+async function handleSetSafetyParams(maxDispute, cooldownSecs, maxResubmit) {
+  const key = 'set-safety-params';
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Updating safety params…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
+  try {
+    await writeContract('set_safety_params', [Number(maxDispute), Number(cooldownSecs), Number(maxResubmit)]);
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Safety params updated', '', 'success', 4000);
+    await loadConfig();
+    render();
+  } catch (e) {
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
+}
+
+/* Admin: set_token_rules */
+async function handleSetTokenRules(tokenAddr, minVote, minPropose) {
+  const key = 'set-token-rules';
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Updating token rules…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
+  try {
+    await writeContract('set_token_rules', [tokenAddr.trim(), Number(minVote), Number(minPropose)]);
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Token rules updated', '', 'success', 4000);
+    await loadConfig();
+    render();
+  } catch (e) {
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
+}
+
+/* Admin: toggle_whitelist */
+async function handleToggleWhitelist(voteWl, proposeWl) {
+  const key = 'toggle-whitelist';
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Updating whitelist settings…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
+  try {
+    await writeContract('toggle_whitelist', [voteWl, proposeWl]);
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Whitelist settings updated', '', 'success', 4000);
+    await loadConfig();
+    render();
+  } catch (e) {
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
+}
+
+/* Admin: manage_whitelist (add/update) */
+async function handleManageWhitelist(userAddr, canVote, canPropose) {
+  if (!userAddr || !userAddr.trim()) { showToast('Address required', '', 'error', 3000); return; }
+  const key = 'manage-whitelist';
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Updating whitelist…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
+  try {
+    await writeContract('manage_whitelist', [userAddr.trim().toLowerCase(), canVote, canPropose]);
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Whitelist updated', formatAddress(userAddr), 'success', 4000);
+    await loadWhitelist();
+    render();
+  } catch (e) {
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
+}
+
+/* Admin: remove_from_whitelist */
+async function handleRemoveFromWhitelist(userAddr) {
+  if (!confirm(`Remove ${formatAddress(userAddr)} from all whitelists?`)) return;
+  const key = `remove-whitelist-${userAddr}`;
+  if (_inFlight.has(key)) return;
+  _inFlight.add(key);
+  const tid = showToast('Removing from whitelist…', 'Transaction submitted…', 'pending', 0);
+  const cancelProgress = startTxProgress(tid, false);
+  try {
+    await writeContract('remove_from_whitelist', [userAddr.trim().toLowerCase()]);
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Removed from whitelist', formatAddress(userAddr), 'success', 4000);
+    await loadWhitelist();
+    render();
+  } catch (e) {
+    cancelProgress();
+    dismissToast(tid);
+    showToast('Failed', mapError(e.message), 'error', 6000);
+  } finally { _inFlight.delete(key); }
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1946,7 +2242,7 @@ function renderCreateProposal() {
     <p class="t-small mb-16" style="margin-bottom:20px">Your proposal will be audited by the constitutional AI before entering the voting queue.</p>
     <div style="background:var(--violet-50);border:.5px solid var(--violet-100);border-radius:8px;padding:12px 14px;margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">
       <div style="width:20px;height:20px;background:var(--violet-500);border-radius:4px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:8px;font-weight:700;color:#fff;flex-shrink:0;margin-top:1px">AI</div>
-      <p style="font-size:13px;color:var(--text-info);line-height:1.5">The AI evaluates your proposal against the constitution at submission. Include a clear objective, specific execution steps, and an accountability mechanism. Submission may take 20–60 seconds while the AI audit runs.</p>
+      <p style="font-size:13px;color:var(--text-info);line-height:1.5">The AI evaluates your proposal against the constitution at submission. Include a clear objective, specific execution steps, and an accountability mechanism. Submission typically takes <strong>2–5 minutes</strong> while the AI audit runs across multiple validators.</p>
     </div>
     <div class="form-card">
       <div class="form-section">
@@ -1987,7 +2283,7 @@ function renderCreateProposal() {
       </div>
       <div class="form-section">
         <button class="btn-primary full-w" onclick="handleSubmitProposal()" ${form.type==='constitution_update'&&!state.isAdmin?'disabled':''}>Submit for AI review →</button>
-        <div class="form-note">Creates a blockchain transaction. AI audit runs at submission time and may take 20–60s.</div>
+        <div class="form-note">Creates a blockchain transaction. The AI audit runs at submission and typically takes 2–5 minutes on Studionet.</div>
       </div>
     </div>
   </div>`;
@@ -2095,67 +2391,266 @@ function renderGovernance() {
 }
 
 function renderAdmin() {
-  if (!state.isAdmin) return `<div class="container" style="padding-top:32px;max-width:580px"><div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-title">Admin access required</div><div class="empty-sub">Your connected wallet does not have admin privileges for this DAO.</div><button class="btn-primary" onclick="navigate('proposals')">Back to proposals</button></div></div>`;
-  const cfg = state.config||{};
-  const pending = state.pendingActions.filter(a=>a.status==='pending');
-  const myAddr = (state.wallet||'').toLowerCase();
+  if (!state.isAdmin) return `<div class="container" style="padding-top:32px;max-width:580px"><div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-title">Admin access required</div><div class="empty-sub">Your connected wallet does not have admin privileges for this protocol.</div><button class="btn-primary" onclick="navigate('proposals')">Back to proposals</button></div></div>`;
+
+  const cfg = state.config || {};
+  const pending = state.pendingActions.filter(a => a.status === 'pending');
+  const myAddr = (state.wallet || '').toLowerCase();
+
+  // Constitution proposals awaiting admin confirmation
+  const pendingConstitution = state.proposals.filter(p => p.status === 'pending_constitution_confirm');
+
+  // Determine remove path: direct remove_admin (3+ admins) vs propose_admin_action (2 admins)
+  const adminCount = state.admins.length;
+  const useMultisigRemove = adminCount <= 2;
 
   return `<div class="container" style="padding-top:24px">
     <div class="page-header"><h1 class="page-title">Admin panel</h1></div>
-    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">Sensitive actions require approval from a second admin within 24 hours.</p>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:24px">Actions marked <span style="background:var(--s-confirm-bg);color:var(--s-confirm-text);border:.5px solid var(--s-confirm-border);border-radius:4px;padding:1px 7px;font-size:11px;font-weight:500">2-admin</span> require approval from a second admin within 24 hours.</p>
+
     <div class="admin-grid">
-      <div class="admin-card">
-        <div class="admin-card-header"><span class="admin-card-title">Pending multisig actions</span>${pending.length>0?`<span class="badge pending_constitution_confirm" style="font-size:10px"><span class="badge-dot"></span>${pending.length} pending</span>`:'<span class="t-small">None</span>'}</div>
+
+      ${pendingConstitution.length > 0 ? `
+      <div class="admin-card" style="border-color:var(--s-confirm-border);background:var(--s-confirm-bg)">
+        <div class="admin-card-header" style="background:var(--s-confirm-bg)"><span class="admin-card-title" style="color:var(--s-confirm-text)">⚠ Constitution confirmation required</span></div>
         <div class="admin-card-body">
-          ${pending.length===0?'<div class="t-small" style="text-align:center;padding:12px 0">No pending actions</div>':pending.map(a=>{
-            const params = (() => { try { return JSON.parse(a.params); } catch(_) { return {}; } })();
-            const isYours = (a.proposer||'').toLowerCase() === myAddr;
-            return `<div class="multisig-action-card"><div style="font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--s-confirm-text);margin-bottom:5px">${esc((a.action_type||'').replace(/_/g,' '))}</div><div style="font-size:12px;color:var(--text-primary);margin-bottom:3px">${a.action_type==='remove_admin'?`Remove: <span class="t-mono">${formatAddress(params.target)}</span>`:a.action_type==='set_eligibility_mode'?`Set mode: <strong>${esc(params.mode)}</strong>`:a.action_type==='constitution_update_propose'?`Confirm constitution for #${params.proposal_id}`:esc(a.action_type)}</div><div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px">By ${formatAddress(a.proposer)} · expires ${formatCountdown(Number(a.proposed_at)+86400)}</div>${isYours?'<div style="font-size:11px;color:var(--text-tertiary);font-style:italic">You proposed this — a different admin must approve</div>':`<button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="handleApproveAction('${esc(a.action_id)}')">Approve &amp; execute</button>`}</div>`;
-          }).join('')}
+          ${pendingConstitution.map(p => `
+          <div style="margin-bottom:10px;padding-bottom:10px;border-bottom:.5px solid var(--s-confirm-border)">
+            <div style="font-size:13px;font-weight:500;color:var(--s-confirm-text);margin-bottom:4px">Proposal #${p.id} — ${esc(p.title)}</div>
+            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Vote passed. Apply constitutional amendment to chain.</div>
+            <button class="btn-primary" style="font-size:12px;padding:6px 14px;background:var(--s-confirm-dot)" onclick="handleConfirmConstitution(${p.id})">Confirm &amp; apply amendment →</button>
+          </div>`).join('')}
+        </div>
+      </div>` : ''}
+
+      <!-- MULTISIG PENDING ACTIONS -->
+      <div class="admin-card">
+        <div class="admin-card-header">
+          <span class="admin-card-title">Pending multisig actions</span>
+          ${pending.length > 0 ? `<span class="badge pending_constitution_confirm" style="font-size:10px"><span class="badge-dot"></span>${pending.length} pending</span>` : '<span class="t-small">None</span>'}
+        </div>
+        <div class="admin-card-body">
+          ${pending.length === 0
+            ? '<div class="t-small" style="text-align:center;padding:12px 0;color:var(--text-tertiary)">No pending actions</div>'
+            : pending.map(a => {
+                const params = (() => { try { return JSON.parse(a.params); } catch(_) { return {}; } })();
+                const isYours = (a.proposer || '').toLowerCase() === myAddr;
+                const expiresAt = Number(a.proposed_at) + 86400;
+                const expired = Math.floor(Date.now()/1000) > expiresAt;
+                return `<div class="multisig-action-card">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                    <div style="font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--s-confirm-text);flex:1">${esc((a.action_type||'').replace(/_/g,' '))}</div>
+                    <span style="font-size:10px;color:${expired?'var(--s-rejected-text)':'var(--text-tertiary)'}">${expired?'Expired':('Expires ' + formatCountdown(expiresAt))}</span>
+                  </div>
+                  <div style="font-size:12px;color:var(--text-primary);margin-bottom:4px">
+                    ${a.action_type==='remove_admin'?`Remove admin: <span class="t-mono">${formatAddress(params.target||'')}</span>`
+                    :a.action_type==='set_eligibility_mode'?`Set eligibility mode → <strong>${esc(params.mode||'')}</strong>`
+                    :a.action_type==='constitution_update_propose'?`Apply constitution from proposal #${params.proposal_id}`
+                    :esc(a.action_type)}
+                  </div>
+                  <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px">
+                    Proposed by <span class="t-mono">${formatAddress(a.proposer)}</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <div style="flex:1;height:4px;background:var(--surface-hover);border-radius:9999px;overflow:hidden"><div style="width:50%;height:100%;background:var(--s-confirm-dot);border-radius:9999px"></div></div>
+                    <span style="font-size:10px;color:var(--s-confirm-text);font-weight:500">1 of 2 admins</span>
+                  </div>
+                  <div style="margin-top:8px">
+                    ${isYours
+                      ? '<div style="font-size:11px;color:var(--text-tertiary);font-style:italic">You proposed this — a different admin must approve</div>'
+                      : expired
+                        ? '<div style="font-size:11px;color:var(--s-rejected-text)">This action has expired. Propose it again.</div>'
+                        : `<button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="handleApproveAction('${esc(a.action_id)}')">Approve &amp; execute →</button>`}
+                  </div>
+                </div>`;
+              }).join('')}
         </div>
       </div>
+
+      <!-- ADMIN MANAGEMENT -->
       <div class="admin-card">
-        <div class="admin-card-header"><span class="admin-card-title">Active admins</span><span class="badge accepted" style="font-size:10px"><span class="badge-dot"></span>${state.admins.length} of ${cfg.max_admins||5}</span></div>
+        <div class="admin-card-header">
+          <span class="admin-card-title">Admin accounts</span>
+          <span class="badge accepted" style="font-size:10px"><span class="badge-dot"></span>${state.admins.length} of ${cfg.max_admins||5}</span>
+        </div>
         <div class="admin-card-body">
-          ${state.admins.map((a,i)=>{
-            const you = a.toLowerCase()===myAddr;
-            const bg = ['#DDD9FB,#4239C4','#D4F5E6,#1A6040','#FDE8D0,#8A4A08'][i%3].split(',');
-            return `<div class="roster-row"><div class="avatar" style="background:${bg[0]};color:${bg[1]}">${a.slice(2,4).toUpperCase()}</div><div style="flex:1"><div class="t-mono" style="font-size:11px;color:var(--text-secondary)">${a}</div>${you?'<div style="font-size:10px;color:var(--text-info);font-weight:500">You</div>':''}</div>${!you&&state.admins.length>2?`<button class="btn-secondary" style="font-size:11px;padding:3px 10px" onclick="handleProposeAdminAction('remove_admin',{target:'${a}'})">Propose remove</button>`:''}</div>`;
+          ${state.admins.map((a, i) => {
+            const you = a.toLowerCase() === myAddr;
+            const bg = ['#DDD9FB,#4239C4','#D4F5E6,#1A6040','#FDE8D0,#8A4A08'][i % 3].split(',');
+            const canRemove = !you && adminCount > 1;
+            const removeAction = useMultisigRemove
+              ? `onclick="handleProposeAdminAction('remove_admin',{target:'${a}'})" title="Requires second admin approval"`
+              : `onclick="handleDirectRemoveAdmin('${a}')"`;
+            return `<div class="roster-row">
+              <div class="avatar" style="background:${bg[0]};color:${bg[1]}">${a.slice(2,4).toUpperCase()}</div>
+              <div style="flex:1">
+                <div class="t-mono" style="font-size:11px;color:var(--text-secondary)">${a}</div>
+                ${you ? '<div style="font-size:10px;color:var(--text-info);font-weight:500">You</div>' : ''}
+              </div>
+              ${canRemove
+                ? `<button class="btn-secondary" style="font-size:11px;padding:3px 10px" ${removeAction}>
+                     ${useMultisigRemove ? '<span style="font-size:9px;margin-right:3px;opacity:.7">2-admin</span>' : ''}Remove
+                   </button>`
+                : (you ? '<span style="font-size:10px;color:var(--text-tertiary)">current</span>' : '')}
+            </div>`;
           }).join('')}
-          <div class="mt-12">
-            <input class="field-input" id="new-admin-input" placeholder="0x… wallet address to add" style="margin-bottom:6px">
+          <div style="margin-top:14px;padding-top:12px;border-top:.5px solid var(--border)">
+            <div class="field-label mb-8">Add admin</div>
+            <div class="field-hint" style="margin-bottom:8px">Address must be a valid 0x… wallet. Max ${cfg.max_admins||5} admins total.</div>
+            <input class="field-input" id="new-admin-input" placeholder="0x1234…abcd" style="margin-bottom:6px">
             <button class="btn-secondary full-w" style="font-size:12px" onclick="handleAddAdmin(document.getElementById('new-admin-input').value)">+ Add admin</button>
           </div>
         </div>
       </div>
+
+      <!-- GOVERNANCE PARAMETERS -->
       <div class="admin-card">
-        <div class="admin-card-header"><span class="admin-card-title">Protocol parameters</span></div>
+        <div class="admin-card-header"><span class="admin-card-title">Governance parameters</span></div>
         <div class="admin-card-body">
-          ${[
-            ['Min quorum', `${cfg.min_quorum||10} votes`],
-            ['Approval threshold', `${cfg.approval_threshold_percent||60}%`],
-            ['Min voting', formatSeconds(cfg.min_voting_duration||3600)],
-            ['Max voting', formatSeconds(cfg.max_voting_duration||2592000)],
-            ['Dispute stages', cfg.max_dispute_stages||3],
-            ['Dispute cooldown', formatSeconds(cfg.dispute_cooldown_seconds||3600)],
-            ['Max resubmissions', cfg.max_resubmissions||3],
-          ].map(([k,v])=>`<div class="param-row"><span class="param-key">${esc(String(k))}</span><span class="param-val">${esc(String(v))}</span></div>`).join('')}
-          <div class="form-note" style="text-align:left;margin-top:10px">Use set_governance_params() and set_safety_params() via the contract to update these values.</div>
+          <div class="field-hint" style="margin-bottom:12px">Changes take effect immediately after transaction confirms.</div>
+          <div class="field">
+            <label class="field-label" for="ap-quorum">Min quorum <span class="field-hint">minimum votes for a valid result · currently ${cfg.min_quorum||10}</span></label>
+            <input class="field-input" id="ap-quorum" type="number" min="1" placeholder="e.g. 10" value="${cfg.min_quorum||10}">
+          </div>
+          <div class="field">
+            <label class="field-label" for="ap-threshold">Approval threshold % <span class="field-hint">1–100 · currently ${cfg.approval_threshold_percent||60}%</span></label>
+            <input class="field-input" id="ap-threshold" type="number" min="1" max="100" placeholder="e.g. 60" value="${cfg.approval_threshold_percent||60}">
+          </div>
+          <div class="field">
+            <label class="field-label" for="ap-mindur">Min voting duration (seconds) <span class="field-hint">currently ${cfg.min_voting_duration||3600} = ${formatSeconds(cfg.min_voting_duration||3600)}</span></label>
+            <input class="field-input" id="ap-mindur" type="number" min="1" placeholder="e.g. 3600 (1 hour)" value="${cfg.min_voting_duration||3600}">
+          </div>
+          <div class="field">
+            <label class="field-label" for="ap-maxdur">Max voting duration (seconds) <span class="field-hint">must exceed min · currently ${cfg.max_voting_duration||2592000} = ${formatSeconds(cfg.max_voting_duration||2592000)}</span></label>
+            <input class="field-input" id="ap-maxdur" type="number" min="1" placeholder="e.g. 2592000 (30 days)" value="${cfg.max_voting_duration||2592000}">
+          </div>
+          <button class="btn-primary full-w" style="margin-top:8px" onclick="(() => {
+            const q=parseInt($('ap-quorum').value), t=parseInt($('ap-threshold').value),
+                  mn=parseInt($('ap-mindur').value), mx=parseInt($('ap-maxdur').value);
+            if(!q||q<1){showToast('Invalid','Min quorum must be ≥ 1','error',3000);return;}
+            if(!t||t<1||t>100){showToast('Invalid','Threshold must be 1–100','error',3000);return;}
+            if(!mn||mn<1){showToast('Invalid','Min duration must be > 0','error',3000);return;}
+            if(!mx||mx<=mn){showToast('Invalid','Max duration must exceed min duration','error',3000);return;}
+            handleSetGovernanceParams(q,t,mn,mx);
+          })()">Update governance params →</button>
         </div>
       </div>
+
+      <!-- SAFETY PARAMETERS -->
       <div class="admin-card">
-        <div class="admin-card-header"><span class="admin-card-title">Eligibility &amp; whitelist</span><span class="badge accepted" style="font-size:10px"><span class="badge-dot"></span>${cfg.eligibility_mode||'open'}</span></div>
+        <div class="admin-card-header"><span class="admin-card-title">Safety parameters</span></div>
         <div class="admin-card-body">
-          ${[
-            ['Voting whitelist', cfg.use_whitelist_for_voting?'Active':'Inactive'],
-            ['Proposing whitelist', cfg.use_whitelist_for_proposing?'Active':'Inactive'],
-            ['Voting token', (cfg.voting_token||'').replace(/^0x0+$/,'None (open)')===cfg.voting_token?formatAddress(cfg.voting_token):'None (open)'],
-            ['Min tokens (vote)', cfg.min_tokens_to_vote||0],
-            ['Min tokens (propose)', cfg.min_tokens_to_propose||0],
-          ].map(([k,v])=>`<div class="param-row"><span class="param-key">${esc(String(k))}</span><span class="param-val">${esc(String(v))}</span></div>`).join('')}
-          ${Object.keys(state.whitelist).length>0?`<div style="margin-top:12px"><div class="t-label mb-8">Whitelisted addresses</div>${Object.entries(state.whitelist).map(([addr,perms])=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:.5px solid var(--border);font-size:12px"><span class="t-mono" style="flex:1;font-size:11px">${formatAddress(addr)}</span><span style="color:var(--s-accepted-text)">${perms.can_vote&&perms.can_propose?'vote + propose':perms.can_vote?'vote only':'propose only'}</span></div>`).join('')}</div>`:''}
+          <div class="field-hint" style="margin-bottom:12px">Controls dispute and revision limits across all proposals.</div>
+          <div class="field">
+            <label class="field-label" for="sp-stages">Max dispute stages <span class="field-hint">AI re-evaluations per proposal · currently ${cfg.max_dispute_stages||3}</span></label>
+            <input class="field-input" id="sp-stages" type="number" min="1" placeholder="e.g. 3" value="${cfg.max_dispute_stages||3}">
+          </div>
+          <div class="field">
+            <label class="field-label" for="sp-cooldown">Dispute cooldown (seconds) <span class="field-hint">wait between dispute stages · currently ${cfg.dispute_cooldown_seconds||3600} = ${formatSeconds(cfg.dispute_cooldown_seconds||3600)}</span></label>
+            <input class="field-input" id="sp-cooldown" type="number" min="1" placeholder="e.g. 3600 (1 hour)" value="${cfg.dispute_cooldown_seconds||3600}">
+          </div>
+          <div class="field">
+            <label class="field-label" for="sp-resubmit">Max resubmissions <span class="field-hint">revisions allowed per proposal · currently ${cfg.max_resubmissions||3}</span></label>
+            <input class="field-input" id="sp-resubmit" type="number" min="1" placeholder="e.g. 3" value="${cfg.max_resubmissions||3}">
+          </div>
+          <button class="btn-primary full-w" style="margin-top:8px" onclick="(() => {
+            const st=parseInt($('sp-stages').value), cd=parseInt($('sp-cooldown').value), rs=parseInt($('sp-resubmit').value);
+            if(!st||st<1){showToast('Invalid','Max dispute stages must be ≥ 1','error',3000);return;}
+            if(!cd||cd<1){showToast('Invalid','Cooldown must be > 0 seconds','error',3000);return;}
+            if(!rs||rs<1){showToast('Invalid','Max resubmissions must be ≥ 1','error',3000);return;}
+            handleSetSafetyParams(st,cd,rs);
+          })()">Update safety params →</button>
         </div>
       </div>
+
+      <!-- TOKEN RULES -->
+      <div class="admin-card">
+        <div class="admin-card-header"><span class="admin-card-title">Token rules</span></div>
+        <div class="admin-card-body">
+          <div class="field-hint" style="margin-bottom:12px">Set ERC-20 or NFT token address and minimum balances required to vote or propose. Use the zero address to disable token gating.</div>
+          <div class="field">
+            <label class="field-label" for="tr-token">Token contract address <span class="field-hint">ERC-20 or NFT · zero address = no token gate</span></label>
+            <input class="field-input" id="tr-token" type="text" placeholder="0x0000…0000 (zero = none)" value="${esc(cfg.voting_token||'0x0000000000000000000000000000000000000000')}">
+          </div>
+          <div class="field">
+            <label class="field-label" for="tr-minvote">Min tokens to vote <span class="field-hint">0 = no minimum · currently ${cfg.min_tokens_to_vote||0}</span></label>
+            <input class="field-input" id="tr-minvote" type="number" min="0" placeholder="e.g. 100" value="${cfg.min_tokens_to_vote||0}">
+          </div>
+          <div class="field">
+            <label class="field-label" for="tr-minpropose">Min tokens to propose <span class="field-hint">0 = no minimum · currently ${cfg.min_tokens_to_propose||0}</span></label>
+            <input class="field-input" id="tr-minpropose" type="number" min="0" placeholder="e.g. 1000" value="${cfg.min_tokens_to_propose||0}">
+          </div>
+          <button class="btn-primary full-w" style="margin-top:8px" onclick="(() => {
+            const tok=$('tr-token').value.trim(), mv=parseInt($('tr-minvote').value), mp=parseInt($('tr-minpropose').value);
+            if(!tok||!tok.startsWith('0x')){showToast('Invalid','Token address must start with 0x','error',3000);return;}
+            if(isNaN(mv)||mv<0){showToast('Invalid','Min vote tokens must be ≥ 0','error',3000);return;}
+            if(isNaN(mp)||mp<0){showToast('Invalid','Min propose tokens must be ≥ 0','error',3000);return;}
+            handleSetTokenRules(tok,mv,mp);
+          })()">Update token rules →</button>
+        </div>
+      </div>
+
+      <!-- ELIGIBILITY MODE (multisig) -->
+      <div class="admin-card">
+        <div class="admin-card-header">
+          <span class="admin-card-title">Eligibility mode</span>
+          <span style="background:var(--s-confirm-bg);color:var(--s-confirm-text);border:.5px solid var(--s-confirm-border);border-radius:4px;padding:1px 7px;font-size:11px;font-weight:500">2-admin</span>
+        </div>
+        <div class="admin-card-body">
+          <div class="field-hint" style="margin-bottom:12px">Requires a second admin to approve. Current mode: <strong>${cfg.eligibility_mode||'open'}</strong>.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px">
+            ${['open','erc20','nft','custom'].map(mode => `
+              <button class="type-opt${(cfg.eligibility_mode||'open')===mode?' selected':''}" style="padding:8px 10px" onclick="handleProposeAdminAction('set_eligibility_mode',{mode:'${mode}'})">
+                <div class="type-opt-title" style="font-size:12px">${mode}</div>
+                <div class="type-opt-desc" style="font-size:10px">${{open:'Anyone can vote/propose',erc20:'ERC-20 token holders',nft:'NFT holders',custom:'Custom logic'}[mode]}</div>
+              </button>`).join('')}
+          </div>
+          <div class="form-note" style="text-align:left">Clicking a mode proposes it — a second admin must approve within 24 hours before it takes effect.</div>
+        </div>
+      </div>
+
+      <!-- WHITELIST CONTROLS -->
+      <div class="admin-card">
+        <div class="admin-card-header">
+          <span class="admin-card-title">Whitelist settings</span>
+        </div>
+        <div class="admin-card-body">
+          <div class="field-hint" style="margin-bottom:12px">Toggle whether whitelists are enforced, then manage individual addresses below.</div>
+          <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="wl-vote" ${cfg.use_whitelist_for_voting?'checked':''} style="width:16px;height:16px;accent-color:var(--violet-500)">
+              Voting whitelist active
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="wl-propose" ${cfg.use_whitelist_for_proposing?'checked':''} style="width:16px;height:16px;accent-color:var(--violet-500)">
+              Proposing whitelist active
+            </label>
+          </div>
+          <button class="btn-secondary full-w" style="font-size:12px;margin-bottom:16px" onclick="handleToggleWhitelist($('wl-vote').checked,$('wl-propose').checked)">Save whitelist toggles</button>
+
+          <div style="border-top:.5px solid var(--border);padding-top:14px">
+            <div class="field-label mb-8">Add / update address</div>
+            <input class="field-input" id="wl-addr" placeholder="0x… wallet address" style="margin-bottom:6px">
+            <div style="display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="wl-canvote" checked style="accent-color:var(--violet-500)"> Can vote</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="wl-canpropose" checked style="accent-color:var(--violet-500)"> Can propose</label>
+            </div>
+            <button class="btn-secondary full-w" style="font-size:12px" onclick="handleManageWhitelist($('wl-addr').value,$('wl-canvote').checked,$('wl-canpropose').checked)">Add / update address</button>
+          </div>
+
+          ${Object.keys(state.whitelist).length > 0 ? `
+          <div style="margin-top:14px;padding-top:12px;border-top:.5px solid var(--border)">
+            <div class="field-label mb-8">Whitelisted addresses (${Object.keys(state.whitelist).length})</div>
+            ${Object.entries(state.whitelist).map(([addr, perms]) => `
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:.5px solid var(--border)">
+                <span class="t-mono" style="flex:1;font-size:11px;color:var(--text-secondary)">${addr}</span>
+                <span style="font-size:11px;color:var(--s-accepted-text)">${perms.can_vote&&perms.can_propose?'vote+propose':perms.can_vote?'vote':'propose'}</span>
+                <button class="btn-secondary" style="font-size:10px;padding:2px 8px" onclick="handleRemoveFromWhitelist('${addr}')">Remove</button>
+              </div>`).join('')}
+          </div>` : '<div class="t-small" style="margin-top:12px;text-align:center;color:var(--text-tertiary)">No addresses whitelisted yet</div>'}
+        </div>
+      </div>
+
     </div>
   </div>`;
 }
@@ -2279,47 +2774,66 @@ function renderAbout() {
 }
 
 /* ══════════════════════════════════════════════════════════
-   MAIN RENDER
+   MAIN RENDER — global error boundary
    ══════════════════════════════════════════════════════════ */
 function render() {
   const body = $('page-body');
-  let html = '';
-  switch (state.page) {
-    case 'proposals':    html = renderProposalsFeed(); break;
-    case 'detail':       html = renderProposalDetail(); break;
-    case 'create':       html = renderCreateProposal(); break;
-    case 'resubmit':     html = renderResubmit(); break;
-    case 'constitution': html = renderConstitution(); break;
-    case 'governance':   html = renderGovernance(); break;
-    case 'admin':        html = renderAdmin(); break;
-    case 'dispute-form': html = renderDisputeForm(); break;
-    case 'about':        html = renderAbout(); break;
-    default:             html = renderProposalsFeed();
+  if (!body) return;
+  try {
+    let html = '';
+    switch (state.page) {
+      case 'proposals':    html = renderProposalsFeed(); break;
+      case 'detail':       html = renderProposalDetail(); break;
+      case 'create':       html = renderCreateProposal(); break;
+      case 'resubmit':     html = renderResubmit(); break;
+      case 'constitution': html = renderConstitution(); break;
+      case 'governance':   html = renderGovernance(); break;
+      case 'admin':        html = renderAdmin(); break;
+      case 'dispute-form': html = renderDisputeForm(); break;
+      case 'about':        html = renderAbout(); break;
+      default:             html = renderProposalsFeed();
+    }
+    body.innerHTML = html;
+  } catch (err) {
+    console.error('[GovLayer] Render error on page', state.page, err);
+    body.innerHTML = `<div class="container" style="padding-top:48px;max-width:580px">
+      <div class="empty-state">
+        <div class="empty-icon">⚠</div>
+        <div class="empty-title">Something went wrong</div>
+        <div class="empty-sub" style="font-family:var(--font-mono);font-size:12px;color:var(--s-rejected-text);margin-bottom:16px">${esc(err.message)}</div>
+        <button class="btn-primary" onclick="navigate('proposals')">Back to proposals</button>
+      </div>
+    </div>`;
   }
-  body.innerHTML = html;
   updateWalletUI();
 }
 
 /* ══════════════════════════════════════════════════════════
-   INIT
+   INIT — awaits SDK before starting data load
    ══════════════════════════════════════════════════════════ */
 async function init() {
-  // Show loading state immediately
+  // Show skeleton immediately
   render();
 
-  // Boot data from live contract
+  // CRITICAL: wait for ESM SDK module to fully resolve before any contract calls
+  try {
+    await waitForSDK(15000);
+  } catch (e) {
+    state.loading.sdk = false;
+    state.loading.proposals = false;
+    state.loading.config = false;
+    state.networkOk = false;
+    showToast('SDK failed to load', e.message, 'error', 0);
+    render();
+    return;
+  }
+  state.loading.sdk = false;
+
+  // Boot data from live contract (with auto-retry on network failure)
   await initData();
 
-  // Re-check admin status if wallet already connected (page refresh)
-  if (state.wallet) {
-    state.isAdmin = state.admins.some(a => a.toLowerCase() === state.wallet);
-    updateWalletUI();
-    render();
-  }
-
-  // Start countdown timer display refresh
+  // Start countdown timer display refresh (lightweight — no full re-render)
   setInterval(() => {
-    // Lightweight: only update visible timer elements without full re-render
     document.querySelectorAll('.timer[data-end]').forEach(el => {
       const end = parseInt(el.dataset.end);
       if (isNaN(end)) return;
