@@ -702,6 +702,20 @@ input, textarea, select { font-family: inherit; }
 }
 .about-link:hover { color: var(--violet-700); }
 
+/* ── Tooltips ─────────────────────────────────────────────── */
+.tip-wrap { position:relative; display:inline-flex; align-items:center; gap:5px; }
+.tip-icon { width:15px; height:15px; border-radius:50%; background:var(--surface-hover);
+  border:.5px solid var(--border); color:var(--text-tertiary); font-size:9px; font-weight:700;
+  display:inline-flex; align-items:center; justify-content:center; cursor:help;
+  flex-shrink:0; transition:background var(--dur-fast); }
+.tip-icon:hover { background:var(--violet-100); color:var(--violet-500); border-color:var(--violet-200); }
+.tip-box { display:none; position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%);
+  background:var(--ink-900); color:#fff; font-size:11px; line-height:1.5; padding:8px 10px;
+  border-radius:7px; width:220px; z-index:200; pointer-events:none;
+  box-shadow:0 4px 16px rgba(0,0,0,.25); }
+.tip-box::after { content:''; position:absolute; top:100%; left:50%; transform:translateX(-50%);
+  border:5px solid transparent; border-top-color:var(--ink-900); }
+.tip-wrap:hover .tip-box, .tip-wrap:focus-within .tip-box { display:block; }
 </style>
 </head>
 
@@ -832,8 +846,8 @@ const state = {
   networkOk:       null,
   toastCounter:    0,
   pollingTimers:   {},
-  historyPage:     { offset: 1, limit: 20 },
-  proposalPage:    { offset: 1, limit: 20 },
+  historyPage:     { offset: 0, limit: 20, hasMore: false },
+  proposalPage:    { offset: 1, limit: 20, hasMore: false },
   renderGeneration: 0,
 };
 
@@ -906,6 +920,10 @@ function resetAdminDraftFromConfig() {
    ══════════════════════════════════════════════════════════ */
 const $ = id => document.getElementById(id);
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+
+/* Wrap a label with a ? tooltip icon */
+const tip = (label, tipText) =>
+  `<span class="tip-wrap">${label}<span class="tip-icon" role="tooltip" tabindex="0">?<span class="tip-box">${esc(tipText)}</span></span></span>`;
 
 function formatAddress(addr) {
   if (!addr || addr.length < 12) return addr || '—';
@@ -1170,22 +1188,34 @@ async function loadConstitution() {
   }
 }
 
-async function loadProposals() {
+async function loadProposals(append = false) {
   state.loading.proposals = true;
   try {
-    // contract: list_proposals is 1-based, oldest-first within the returned page.
-    // To always show newest proposals: fetch the LAST page by computing offset from proposal_count.
-    // If proposal_count is 0 or unknown, fall back to offset 1.
     const limit = 20;
     const total = state.config ? Number(state.config.proposal_count) : 0;
-    // offset of the last page: e.g. count=25 → offset=6, fetches #6-25 (newest 20)
-    const offset = total > limit ? total - limit + 1 : 1;
-
+    let offset;
+    if (append) {
+      // Load page BEFORE the oldest currently visible proposal
+      const oldestId = state.proposals.length > 0
+        ? Math.min(...state.proposals.map(p => Number(p.id))) : total + 1;
+      offset = Math.max(1, oldestId - limit);
+    } else {
+      // Always start at the newest page
+      offset = total > limit ? total - limit + 1 : 1;
+    }
     const list = await readContract('list_proposals', [offset, limit]);
     if (Array.isArray(list)) {
-      // Contract returns oldest-first within the page — reverse for newest-first feed display
-      state.proposals = list.slice().reverse();
-      state.totalProposals = total || list.length;
+      if (append) {
+        const existingIds = new Set(state.proposals.map(p => Number(p.id)));
+        const newOnes = list.filter(p => !existingIds.has(Number(p.id)));
+        state.proposals = [...state.proposals, ...newOnes].sort((a,b) => Number(b.id) - Number(a.id));
+      } else {
+        state.proposals = list.slice().reverse();
+      }
+      state.totalProposals = total || state.proposals.length;
+      const oldestLoaded = state.proposals.length > 0
+        ? Math.min(...state.proposals.map(p => Number(p.id))) : 1;
+      state.proposalPage.hasMore = oldestLoaded > 1;
     }
   } catch (e) {
     console.warn('loadProposals:', e.message);
@@ -1212,11 +1242,31 @@ async function loadProposal(id) {
   }
 }
 
-async function loadHistory(offset = 0, limit = 20) {
+async function loadHistory(append = false) {
   try {
+    const limit = 20;
+    const total = state.config ? Number(state.config.governance_history_count) : 0;
+    let offset;
+    if (append) {
+      // Already have newest; load older entries (contract is 0-based)
+      const currentCount = state.history.length;
+      offset = Math.max(0, total - currentCount - limit);
+    } else {
+      offset = Math.max(0, total - limit);
+    }
     const hist = await readContract('get_governance_history', [offset, limit]);
-    // Contract returns oldest-first (chronological append); reverse for newest-first display
-    if (Array.isArray(hist)) state.history = hist.slice().reverse();
+    if (Array.isArray(hist)) {
+      if (append) {
+        // Deduplicate by timestamp+details fingerprint, append older entries
+        const existingKeys = new Set(state.history.map(h => `${h.timestamp}:${h.details}`));
+        const newOnes = hist.filter(h => !existingKeys.has(`${h.timestamp}:${h.details}`));
+        state.history = [...state.history, ...newOnes.slice().reverse()];
+      } else {
+        state.history = hist.slice().reverse();
+      }
+      state.historyCount = total;
+      state.historyPage.hasMore = state.history.length < total;
+    }
   } catch (e) {
     console.warn('loadHistory:', e.message);
   }
@@ -1570,6 +1620,15 @@ function auditPanelHtml(p) {
   const vl = {accept:'Accepted',revise:'Needs revision',reject:'Rejected'}[p.ai_audit_decision]||p.ai_audit_decision;
   const isUpdate = p.proposal_type === 'constitution_update';
   const conflicts = Array.isArray(p.constitutional_conflicts) ? p.constitutional_conflicts : [];
+  const resubmitCount = Number(p.resubmit_count || 0);
+  const disputeCount  = Number(p.dispute_count  || 0);
+  // Context note: explain if this is a revised or re-evaluated result
+  let contextNote = '';
+  if (resubmitCount > 0 && disputeCount === 0) {
+    contextNote = `<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px;font-style:italic">Showing result from revision ${resubmitCount} (latest re-audit). ${resubmitCount} of ${state.config?.max_resubmissions??3} revisions used.</div>`;
+  } else if (disputeCount > 0) {
+    contextNote = `<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px;font-style:italic">Current result reflects the latest AI evaluation after ${disputeCount} dispute stage${disputeCount!==1?'s':''}. See Dispute history below for full stage-by-stage reasoning.</div>`;
+  }
 
   return `<div class="audit-panel">
     <div class="audit-header">
@@ -1578,6 +1637,7 @@ function auditPanelHtml(p) {
       <span class="verdict-chip ${vc}" role="status">${vl}</span>
     </div>
     <div class="audit-body">
+      ${contextNote}
       <div class="audit-reasoning">${esc(p.ai_audit_reasoning)}</div>
       ${conflicts.length > 0
         ? `<div class="t-label mb-8">Constitutional conflicts</div><div class="conflict-list">${conflicts.map(c=>`<div class="conflict-item"><div class="conflict-clause">${esc(c.clause)}</div><div class="conflict-text">${esc(c.violation)}</div></div>`).join('')}</div>`
@@ -1605,13 +1665,43 @@ function constitutionDiffHtml(current, proposed) {
   return `<div class="diff-wrap"><div class="diff-header"><span>Proposed constitutional changes</span><span style="color:var(--s-accepted-text)">${changes} change${changes!==1?'s':''}</span></div>${html}</div>`;
 }
 
-function disputeTimelineHtml(history) {
-  if (!history || history.length === 0) return `<div style="font-size:13px;color:var(--text-tertiary);text-align:center;padding:12px 0">No disputes yet.</div>`;
-  return `<div class="dispute-timeline">${history.map((h,i)=>{
-    const last = i === history.length-1;
-    const dot = (h.resolution||'').toLowerCase().includes('accept')?'var(--s-accepted-dot)':'var(--s-rejected-dot)';
-    return `<div class="dispute-stage"><div class="stage-line-col"><div class="stage-num" style="background:${dot}">${h.stage||i+1}</div>${!last?'<div class="stage-connector"></div>':''}</div><div class="stage-content"><div class="stage-label">Stage ${h.stage||i+1}</div><div class="stage-reason">${esc(h.reason)}</div><div class="stage-resolution">${esc(h.resolution)}</div><div class="stage-ts">${formatTimestamp(h.timestamp)}</div></div></div>`;
-  }).join('')}</div>`;
+function disputeTimelineHtml(history, disputeCount) {
+  if (!history || history.length === 0) {
+    if (disputeCount > 0) return `<div style="font-size:13px;color:var(--text-tertiary);text-align:center;padding:12px 0">Dispute history loading — check back shortly.</div>`;
+    return `<div style="font-size:13px;color:var(--text-tertiary);text-align:center;padding:12px 0">No disputes raised yet.</div>`;
+  }
+  const maxStages = Number(state.config?.max_dispute_stages ?? 3);
+  return `<div class="dispute-timeline">${history.map((h, i) => {
+    const last = i === history.length - 1;
+    const res = (h.resolution || '').toLowerCase();
+    const isAccepted = res.includes('accept') || res.includes('pass') || res.includes('overturn');
+    const isRejected = res.includes('reject') || res.includes('uphold') || res.includes('fail');
+    const dotColor = isAccepted ? 'var(--s-accepted-dot)' : isRejected ? 'var(--s-rejected-dot)' : 'var(--violet-300)';
+    const stageLabel = i === 0 ? 'Re-evaluation by original AI' : `Independent AI panel — stage ${h.stage || i+1}`;
+    return `<div class="dispute-stage">
+      <div class="stage-line-col">
+        <div class="stage-num" style="background:${dotColor};color:#fff;font-weight:600">${h.stage || i+1}</div>
+        ${!last ? '<div class="stage-connector"></div>' : ''}
+      </div>
+      <div class="stage-content">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap">
+          <div class="stage-label">Stage ${h.stage || i+1}</div>
+          <span style="font-size:10px;color:var(--text-tertiary);font-style:italic">${stageLabel}</span>
+          ${h.timestamp ? `<span style="font-size:10px;color:var(--text-tertiary);margin-left:auto">${formatTimestamp(h.timestamp)}</span>` : ''}
+        </div>
+        ${h.reason ? `<div style="margin-bottom:6px">
+          <div style="font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);margin-bottom:3px">Dispute reason</div>
+          <div class="stage-reason">${esc(h.reason)}</div>
+        </div>` : ''}
+        ${h.resolution ? `<div style="background:${isAccepted?'var(--s-accepted-bg)':isRejected?'var(--s-rejected-bg)':'var(--surface-card)'};border:.5px solid ${isAccepted?'var(--s-accepted-border)':isRejected?'var(--s-rejected-border)':'var(--border)'};border-radius:6px;padding:8px 10px">
+          <div style="font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:${isAccepted?'var(--s-accepted-text)':isRejected?'var(--s-rejected-text)':'var(--text-tertiary)'};margin-bottom:4px">AI re-evaluation outcome</div>
+          <div style="font-size:12px;color:var(--text-primary);line-height:1.5">${esc(h.resolution)}</div>
+        </div>` : '<div style="font-size:12px;color:var(--text-tertiary);font-style:italic">Outcome pending…</div>'}
+      </div>
+    </div>`;
+  }).join('')}
+  ${history.length < maxStages ? `<div style="padding:8px 0 2px 36px;font-size:11px;color:var(--text-tertiary)">${maxStages - history.length} more stage${maxStages-history.length!==1?'s':''} available</div>` : `<div style="padding:8px 0 2px 36px;font-size:11px;color:var(--s-rejected-text)">All ${maxStages} dispute stages exhausted</div>`}
+  </div>`;
 }
 
 function networkBannerHtml() {
@@ -1646,11 +1736,11 @@ function actionSidebarHtml(p) {
       } else if (voted !== undefined) {
         actionsHtml = `<div class="already-voted-msg mt-8"><span class="voted-dot" style="background:${voted?'var(--s-accepted-dot)':'var(--s-rejected-dot)'}"></span>You voted <strong>${voted?'for':'against'}</strong> this proposal</div>`;
       } else {
-        actionsHtml = `<div class="vote-buttons mt-8"><button class="btn-vote-for" onclick="handleVote(${p.id},true)">Vote for</button><button class="btn-vote-against" onclick="handleVote(${p.id},false)">Vote against</button></div>`;
+        actionsHtml = `<div class="vote-buttons mt-8"><button class="btn-vote-for" onclick="handleVote(${p.id},true)">${tip('Vote for','Cast a binding on-chain vote in favour of this proposal. Votes cannot be changed after submission.')}</button><button class="btn-vote-against" onclick="handleVote(${p.id},false)">${tip('Vote against','Cast a binding on-chain vote against this proposal. Votes cannot be changed after submission.')}</button></div>`;
       }
       if (isProposer) actionsHtml += `<button class="btn-danger full-w mt-8" onclick="handleCancel(${p.id})">Cancel proposal</button>`;
     } else {
-      actionsHtml = `<button class="finalize-cta mt-8" onclick="handleFinalize(${p.id})"><span>⚖</span> Close voting &amp; record outcome</button><div class="form-note mt-8">Anyone can close the vote</div>`;
+      actionsHtml = `<button class="finalize-cta mt-8" onclick="handleFinalize(${p.id})"><span>⚖</span> ${tip('Close voting &amp; record outcome', 'Permissionless — anyone can call this once the voting window has closed. It computes the final tally and records the pass/fail outcome permanently on-chain.')}</button><div class="form-note mt-8">Anyone can close the vote</div>`;
     }
   }
 
@@ -1676,7 +1766,7 @@ function actionSidebarHtml(p) {
         const lastAt = Number(p.last_dispute_at||0);
         const elapsed = Math.floor(Date.now()/1000) - lastAt;
         if (lastAt === 0 || elapsed >= cooldown) {
-          actionsHtml += `<button class="btn-secondary full-w mt-8" onclick="navigate('dispute-form',${p.id})">Raise a dispute</button>`;
+          actionsHtml += `<button class="btn-secondary full-w mt-8" onclick="navigate('dispute-form',${p.id})">${tip('Raise a dispute', 'Triggers a fresh AI re-evaluation of this proposal. Stage 1 uses the original AI; Stage 2+ uses an independent AI panel. Each stage has a cooldown period between them.')}</button>`;
         } else {
           const unlockAt = lastAt + cooldown;
           actionsHtml += `<div class="mt-8"><span class="timer cooldown">Next dispute in ${formatCountdown(unlockAt)}</span></div>`;
@@ -1709,7 +1799,7 @@ function actionSidebarHtml(p) {
       ${actionsHtml}
     </div>
   </div>
-  ${Number(p.dispute_count||0)>0||p.status==='under_review'?`<div class="sidebar-card mt-0"><div class="sidebar-section"><div class="t-label mb-12">Disputes (${p.dispute_count||0} stage${Number(p.dispute_count||0)!==1?'s':''})</div>${disputeTimelineHtml(p.dispute_history)}</div></div>`:''}`;
+  ${Number(p.dispute_count||0)>0||p.status==='under_review'?`<div class="sidebar-card mt-0"><div class="sidebar-section"><div class="t-label mb-12">Dispute history (${p.dispute_count||0} of ${state.config?.max_dispute_stages??3} stages used)</div>${disputeTimelineHtml(p.dispute_history, Number(p.dispute_count||0))}</div></div>`:''}`;
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -2164,12 +2254,49 @@ function renderActionBanner() {
 
 function renderProposalsFeed() {
   const filter = state.filters.proposals;
+  const now = Math.floor(Date.now() / 1000);
+  const myAddr = (state.wallet || '').toLowerCase();
+  const cfg = state.config || {};
+  const maxStages    = Number(cfg.max_dispute_stages ?? 3);
+  const maxResubmits = Number(cfg.max_resubmissions  ?? 3);
+  const STALE_SECS   = 7 * 86400; // 7 days
+
+  /* ── Active filter rules (contract-grounded) ───────────────────────────
+     Always active:   pending | under_review | pending_constitution_confirm
+     Conditionally:
+       needs_revision → active if connected wallet is proposer
+                        AND (resubmit_count < max_resubmissions)
+                        AND (now - submitted_at < 7 days)
+       rejected       → active if connected wallet is proposer (only party
+                        who can dispute an AI-rejected proposal before votes)
+                        AND dispute_count < max_dispute_stages
+                        AND (now - submitted_at < 7 days)
+       accepted       → ALWAYS in All only (disputable but concluded)
+       cancelled      → ALWAYS in All only (terminal)
+  ─────────────────────────────────────────────────────────────────────── */
+  function isActiveForMe(p) {
+    if (['pending','under_review','pending_constitution_confirm'].includes(p.status)) return true;
+    if (p.status === 'needs_revision') {
+      const isProposer = (p.proposer || '').toLowerCase() === myAddr;
+      const notExhausted = Number(p.resubmit_count || 0) < maxResubmits;
+      const notStale = (now - Number(p.submitted_at || 0)) < STALE_SECS;
+      return isProposer && notExhausted && notStale;
+    }
+    if (p.status === 'rejected') {
+      const isProposer = (p.proposer || '').toLowerCase() === myAddr;
+      const disputesLeft = Number(p.dispute_count || 0) < maxStages;
+      const notStale = (now - Number(p.submitted_at || 0)) < STALE_SECS;
+      return isProposer && disputesLeft && notStale;
+    }
+    return false;
+  }
+
   let filtered = state.proposals;
-  if (filter === 'active') filtered = state.proposals.filter(p => ['pending','needs_revision','under_review'].includes(p.status));
+  if (filter === 'active') filtered = state.proposals.filter(p => isActiveForMe(p));
   else if (filter === 'attention') filtered = state.proposals.filter(p =>
-    (p.status==='pending' && isVotingClosed(p.voting_end)) ||
-    p.status==='pending_constitution_confirm' ||
-    (p.status==='needs_revision' && (p.proposer||'').toLowerCase()===(state.wallet||'').toLowerCase())
+    (p.status === 'pending' && isVotingClosed(p.voting_end)) ||
+    p.status === 'pending_constitution_confirm' ||
+    (p.status === 'needs_revision' && (p.proposer || '').toLowerCase() === myAddr)
   );
 
   const skeletons = state.loading.proposals
@@ -2177,7 +2304,7 @@ function renderProposalsFeed() {
     : '';
 
   const cardsHtml = state.loading.proposals ? skeletons : filtered.length === 0
-    ? `<div class="empty-state"><div class="empty-icon" aria-hidden="true">📜</div><div class="empty-title">No ${filter==='active'?'active ':filter==='attention'?'attention-needed ':''}proposals</div><div class="empty-sub">${filter==='active'?'All proposals have been finalized. Submit a new proposal to start a governance discussion.':'Everything is up to date.'}</div><div><button class="btn-primary" onclick="navigate('create')" style="margin-right:8px">Submit proposal</button><button class="btn-secondary" onclick="setFilter('all')">View all</button></div></div>`
+    ? `<div class="empty-state"><div class="empty-icon" aria-hidden="true">📜</div><div class="empty-title">No ${filter==='active'?'active ':filter==='attention'?'attention-needed ':''}proposals</div><div class="empty-sub">${filter==='active'?'No proposals in progress. Submit a new proposal to start a governance discussion.':'Everything is up to date.'}</div><div><button class="btn-primary" onclick="navigate('create')" style="margin-right:8px">Submit proposal</button><button class="btn-secondary" onclick="setFilter('all')">View all</button></div></div>`
     : filtered.map((p,i) => {
         const yr = Number(p.votes_yes||0), nr = Number(p.votes_no||0), tr = yr+nr;
         const yp = tr>0?Math.round((yr/tr)*100):0, np = tr>0?Math.round((nr/tr)*100):0;
@@ -2196,7 +2323,6 @@ function renderProposalsFeed() {
         </article>`;
       }).join('');
 
-  const cfg = state.config || {};
   const acc = state.proposals.filter(p=>p.status==='accepted').length;
   const rej = state.proposals.filter(p=>p.status==='rejected').length;
   const tot = state.proposals.length;
@@ -2216,7 +2342,24 @@ function renderProposalsFeed() {
         </div>
       </div>
       <div class="feed-layout">
-        <div class="feed-list">${cardsHtml}</div>
+        <div class="feed-list">
+          ${cardsHtml}
+          ${!state.loading.proposals && state.proposalPage.hasMore && filter === 'all' ? `
+          <div style="text-align:center;padding:16px 0">
+            <button class="btn-secondary" style="font-size:13px" onclick="loadProposals(true).then(()=>render())">
+              Load older proposals
+            </button>
+            <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">
+              Showing ${state.proposals.length} of ${state.totalProposals} proposals
+            </div>
+          </div>` : ''}
+          ${!state.loading.proposals && state.totalProposals > 20 && filter !== 'all' ? `
+          <div style="text-align:center;padding:12px 0">
+            <button class="btn-secondary" style="font-size:12px" onclick="setFilter('all')">
+              View all ${state.totalProposals} proposals →
+            </button>
+          </div>` : ''}
+        </div>
         <aside class="sidebar">
           <div class="sidebar-card">
             <div class="sidebar-section">
@@ -2363,7 +2506,7 @@ function renderCreateProposal() {
         <div class="form-note" style="text-align:left;margin-top:8px">Voting opens immediately when the AI audit passes. Window: ${formatSeconds(form.duration)}.</div>
       </div>
       <div class="form-section">
-        <button class="btn-primary full-w" onclick="handleSubmitProposal()" ${form.type==='constitution_update'&&!state.isAdmin?'disabled':''}>Submit for AI review →</button>
+        <button class="btn-primary full-w" onclick="handleSubmitProposal()" ${form.type==='constitution_update'&&!state.isAdmin?'disabled':''}>${tip('Submit for AI review →', 'Your proposal is sent to the constitutional AI before any voting occurs. The AI checks it against the constitution and returns accept, needs revision, or reject with specific clause citations. This takes 2–5 minutes.')}</button>
         <div class="form-note">Creates a blockchain transaction. The AI audit runs at submission and typically takes 2–5 minutes on Studionet.</div>
       </div>
     </div>
@@ -2398,6 +2541,9 @@ function renderResubmit() {
 function renderConstitution() {
   const text = state.constitution;
   const pendingUpdate = state.proposals.find(p => p.proposal_type==='constitution_update' && p.status==='pending_constitution_confirm');
+  // Find most recent confirmed constitution update from history for version context
+  const constitutionUpdates = state.history.filter(h => h.change_type && h.change_type.includes('constitution'));
+  const lastUpdated = constitutionUpdates.length > 0 ? constitutionUpdates[0] : null; // history is newest-first
 
   if (!text) return `<div class="container" style="padding-top:32px"><div class="empty-state"><div class="empty-icon">📜</div><div class="empty-title">Loading constitution…</div><div class="empty-sub">Fetching from the GenLayer network.</div></div></div>`;
 
@@ -2406,7 +2552,17 @@ function renderConstitution() {
     ${pendingUpdate?`<div style="background:var(--s-confirm-bg);border:.5px solid var(--s-confirm-border);border-radius:8px;padding:14px 16px;margin-bottom:24px;display:flex;align-items:flex-start;gap:10px" role="alert"><span>⚠</span><div style="flex:1"><div style="font-size:13px;font-weight:500;color:var(--s-confirm-text);margin-bottom:4px">Constitutional amendment pending</div><div style="font-size:12px;color:var(--s-confirm-text);opacity:.85;line-height:1.5">Proposal #${pendingUpdate.id} "${esc(pendingUpdate.title)}" has passed the community vote and is awaiting admin confirmation.</div>${state.isAdmin?`<button class="btn-primary mt-8" style="font-size:12px;padding:5px 14px;background:var(--s-confirm-dot)" onclick="navigate('detail',${pendingUpdate.id})">Review and confirm →</button>`:''}</div></div>`:''}
     <div class="page-header" style="padding-bottom:16px">
       <h1 class="page-title">Constitution</h1>
-      <div class="page-header-right"><span class="t-mono" style="font-size:11px">v1.0</span>${pendingUpdate?`<span class="badge pending_constitution_confirm"><span class="badge-dot"></span>Amendment pending</span>`:`<span class="badge accepted"><span class="badge-dot"></span>Active</span>`}</div>
+      <div class="page-header-right">
+        ${pendingUpdate
+          ? `<span class="badge pending_constitution_confirm"><span class="badge-dot"></span>Amendment pending</span>`
+          : `<span class="badge accepted"><span class="badge-dot"></span>Active</span>`}
+      </div>
+    </div>
+    ${lastUpdated
+      ? `<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:4px">Last amended ${formatTimestamp(Number(lastUpdated.timestamp))} · <button class="btn-secondary" style="font-size:11px;padding:2px 10px;margin-left:4px" onclick="navigate('governance')">View amendment history →</button></div>`
+      : `<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:4px">This is the founding constitution. No amendments have been ratified yet.</div>`}
+    <div style="background:var(--violet-50);border:.5px solid var(--violet-100);border-radius:7px;padding:10px 14px;margin-bottom:20px;font-size:12px;color:var(--text-info);line-height:1.5">
+      This is the <strong>active, on-chain constitution</strong> — the authoritative ruleset the AI uses to evaluate every proposal. Amendment history is traceable in the <button style="background:none;border:none;padding:0;color:var(--violet-500);font-size:12px;font-weight:500;cursor:pointer;text-decoration:underline" onclick="navigate('governance')">Governance activity log</button>.
     </div>
     <div style="font-size:14px;line-height:1.75;color:var(--text-primary)">
       ${articles.map(article=>{
@@ -2463,8 +2619,20 @@ function renderGovernance() {
         <div class="t-label mb-12">Governance activity log</div>
         <div class="sidebar-card">
           <div class="sidebar-section" style="border-bottom:none">
-            ${state.history.length===0?`<div class="t-small" style="text-align:center;padding:12px 0">No history yet</div>`:state.history.map(h=>`<div class="history-entry"><div style="display:flex;align-items:center;gap:8px"><span style="width:7px;height:7px;border-radius:50%;background:${h.change_type.includes('accept')?'var(--s-accepted-dot)':h.change_type.includes('reject')?'var(--s-rejected-dot)':h.change_type.includes('admin')?'var(--s-confirm-dot)':'var(--violet-300)'};flex-shrink:0"></span><div style="font-size:12px;color:var(--text-primary)">${esc((h.details||'').slice(0,90))}${(h.details||'').length>90?'…':''}</div></div><div class="log-ts">${formatTimestamp(Number(h.timestamp))} · <span style="color:var(--text-info)">${esc((h.change_type||'').replace(/_/g,' '))}</span></div></div>`).join('')}
+            ${state.history.length===0
+              ? `<div class="t-small" style="text-align:center;padding:12px 0">No history yet</div>`
+              : state.history.map(h=>`<div class="history-entry"><div style="display:flex;align-items:center;gap:8px"><span style="width:7px;height:7px;border-radius:50%;background:${h.change_type.includes('accept')?'var(--s-accepted-dot)':h.change_type.includes('reject')?'var(--s-rejected-dot)':h.change_type.includes('admin')?'var(--s-confirm-dot)':'var(--violet-300)'};flex-shrink:0"></span><div style="font-size:12px;color:var(--text-primary)">${esc((h.details||'').slice(0,90))}${(h.details||'').length>90?'…':''}</div></div><div class="log-ts">${formatTimestamp(Number(h.timestamp))} · <span style="color:var(--text-info)">${esc((h.change_type||'').replace(/_/g,' '))}</span></div></div>`).join('')
+            }
           </div>
+          ${state.historyPage.hasMore ? `
+          <div style="padding:12px 16px;border-top:.5px solid var(--border);text-align:center">
+            <button class="btn-secondary full-w" style="font-size:12px" onclick="loadHistory(true).then(()=>render())">
+              Load older activity
+            </button>
+            <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">
+              Showing ${state.history.length} of ${state.historyCount} entries
+            </div>
+          </div>` : (state.historyCount > 0 ? `<div style="padding:8px 16px;font-size:11px;color:var(--text-tertiary);text-align:center;border-top:.5px solid var(--border)">${state.historyCount} total entries — all loaded</div>` : '')}
         </div>
       </div>
     </div>
@@ -2744,7 +2912,7 @@ function renderDisputeForm() {
     <button class="back-link" onclick="navigate('detail',${p.id})">← Proposal #${p.id}</button>
     <h1 class="page-title" style="margin-bottom:4px;font-family:var(--font-display)">Raise a dispute</h1>
     <p class="t-small mb-16" style="margin-bottom:20px">Stage ${Number(p.dispute_count||0)+1} of maximum ${cfg.max_dispute_stages||3} · Triggers AI re-evaluation.</p>
-    ${Number(p.dispute_count||0)>0?`<div class="mb-16"><div class="t-label mb-8">Previous stages</div>${disputeTimelineHtml(p.dispute_history)}</div>`:''}
+    ${Number(p.dispute_count||0)>0?`<div class="mb-16"><div class="t-label mb-8">Previous stages</div>${disputeTimelineHtml(p.dispute_history, Number(p.dispute_count||0))}</div>`:''}
     <div class="form-card">
       <div class="form-section">
         <label class="field-label" for="dispute-reason">Reason for dispute</label>
@@ -2770,9 +2938,11 @@ function renderAbout() {
 
       <p class="about-lead">
         GovLayer is a constitutional governance protocol built on GenLayer.
-        Every proposal is evaluated by an AI against a living, on-chain constitution
-        before the community votes — combining the rigour of constitutional review
-        with the openness of decentralised participation.
+        Instead of treating governance as a voting event, it treats it as a
+        <strong>structured, rule-driven process</strong> — where every proposal is
+        evaluated by an AI against a living, on-chain constitution before the community votes.
+        The result is governance that is not only decentralised, but also disciplined,
+        explainable, and constitutionally grounded.
       </p>
 
       <div style="background:var(--surface-card);border:.5px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:28px">
@@ -2787,19 +2957,50 @@ function renderAbout() {
         </div>
       </div>
 
-      <h2 class="about-h2">How it works</h2>
+      <h2 class="about-h2">The governance lifecycle</h2>
+      <p class="about-p" style="margin-bottom:16px">Traditional DAO governance is a single event — voting. GovLayer is a multi-stage process where each stage is explicitly defined, enforced by smart contract logic, and surfaced transparently.</p>
       <div class="about-flow">
         ${[
-          ['Submit a proposal',   'Any eligible address submits a proposal with a title, description, and voting duration. Constitution update proposals are admin-only.'],
-          ['AI constitutional audit', 'The GenVM AI reviews the proposal against the current constitution and returns accept, revise, or reject with specific clause citations. This happens at submission time, before any votes are cast.'],
-          ['Community voting',    'Accepted proposals enter a voting window. Any eligible address votes for or against. Votes are locked — no changing after casting.'],
-          ['Finalization',        'Once the voting window closes, anyone can call finalize to record the outcome. If quorum is met and the approval threshold is reached, the proposal passes.'],
-          ['Dispute resolution',  'Rejected or accepted proposals can be disputed by the proposer or any voter. Each dispute triggers a fresh AI re-evaluation — up to 3 stages with a 1-hour cooldown between stages.'],
-          ['Constitution updates','Successful constitutional amendments require admin confirmation before the on-chain constitution is updated. Dispute-accepted amendments require 2-admin multisig approval.'],
+          ['Submit a proposal',
+           'Any eligible address submits a proposal with a title, description, and voting duration. Constitution update proposals are admin-only. The proposal does not go to a vote immediately.'],
+          ['AI constitutional audit',
+           'The GenVM AI reviews the proposal against the current on-chain constitution and returns accept, needs revision, or reject — with specific clause citations and plain-language reasoning. This happens before any votes are cast. The AI acts not as an authority, but as an enforcer of the constitution.'],
+          ['Revision loop (if needed)',
+           'If flagged as needs revision, the proposer receives structured feedback with specific issues highlighted. The proposal can be resubmitted for re-audit (within defined limits). This transforms governance into an iterative improvement process rather than a binary accept/reject system.'],
+          ['Community voting',
+           'Once a proposal passes constitutional review, voting opens for eligible participants. Votes are binding and cannot be changed. The system tracks quorum requirements and approval thresholds.'],
+          ['Finalization',
+           'Once the voting window closes, anyone can call finalize to record the outcome. If quorum is met and the approval threshold is reached, the proposal passes. The result is recorded permanently on-chain.'],
+          ['Dispute resolution',
+           'Accepted or rejected proposals can be disputed by the proposer, voters, or admins. Each dispute triggers a fresh AI re-evaluation — Stage 1 uses the original AI; Stage 2+ uses an independent AI panel. Up to 3 stages with a cooldown between each.'],
+          ['Constitution updates',
+           'Successful constitutional amendments require admin confirmation before the on-chain constitution is updated. This ensures the ruleset itself evolves through a deliberate, auditable process.'],
         ].map(([title, desc], i) => `
           <div class="about-flow-step">
             <div class="about-flow-num">${i+1}</div>
             <div><div class="about-flow-title">${title}</div><div class="about-flow-desc">${desc}</div></div>
+          </div>`).join('')}
+      </div>
+
+      <h2 class="about-h2">What makes GovLayer different</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:24px">
+        ${[
+          ['Governance before voting',
+           'Proposals are validated against the constitution before they reach voters. This reduces noise, eliminates invalid proposals early, and improves the quality of decisions the community actually votes on.'],
+          ['AI as constitutional enforcer',
+           'Unlike typical AI integrations used for prediction or automation, GovLayer uses AI specifically for rule enforcement and interpretation — making constitutional compliance machine-verifiable.'],
+          ['Iterative improvement',
+           'Rather than rejecting weak proposals outright, GovLayer helps refine them through structured feedback. Proposals evolve before reaching voters, raising overall governance quality.'],
+          ['Explainable outcomes',
+           'Every decision — accept, reject, or revise — includes AI reasoning, clause-level references, and a verifiable on-chain record. No opaque or arbitrary decisions.'],
+          ['Structured dispute mechanism',
+           'Disputes are not ad hoc. They follow a clear multi-stage process with defined limits, cooldowns, and escalating AI panel review — distinguishing GovLayer from systems like Snapshot or Tally.'],
+          ['On-chain transparency',
+           'All actions — votes, disputes, finalizations, admin changes — are recorded, verifiable, and auditable. The constitution itself lives on-chain and can only change through a governed process.'],
+        ].map(([title, desc]) => `
+          <div style="background:var(--surface-card);border:.5px solid var(--border);border-radius:8px;padding:14px 16px">
+            <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:5px">${title}</div>
+            <div style="font-size:12px;color:var(--text-secondary);line-height:1.6">${desc}</div>
           </div>`).join('')}
       </div>
 
@@ -2822,11 +3023,11 @@ function renderAbout() {
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px">
         ${[
           ['pending',                    'Voting is open — eligible addresses can cast votes'],
-          ['needs_revision',             'AI returned revise — proposer must edit and resubmit'],
+          ['needs_revision',             'AI returned revise — proposer must address feedback and resubmit'],
           ['accepted',                   'Proposal passed both AI audit and community vote'],
-          ['rejected',                   'Failed vote, quorum, or AI audit — can be disputed'],
+          ['rejected',                   'Failed vote, quorum, or AI audit — can be disputed by proposer or voters'],
           ['under_review',               'Dispute in progress — AI panel deliberating'],
-          ['pending_constitution_confirm','Constitution update passed — awaiting admin confirmation'],
+          ['pending_constitution_confirm','Constitution update passed — awaiting admin confirmation to apply'],
           ['cancelled',                  'Cancelled by the proposer before finalization'],
         ].map(([status, desc]) => `
           <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:.5px solid var(--border)">
@@ -2835,8 +3036,18 @@ function renderAbout() {
           </div>`).join('')}
       </div>
 
+      <h2 class="about-h2">Use cases</h2>
+      <p class="about-p">GovLayer is applicable to any system requiring rule-consistent, explainable decisions:</p>
+      <ul style="font-size:13px;color:var(--text-secondary);line-height:1.9;padding-left:20px;margin-bottom:24px">
+        <li>DAOs requiring structured, enforceable governance frameworks</li>
+        <li>Protocol upgrades and parameter tuning with constitutional guardrails</li>
+        <li>Treasury decision-making with accountability requirements</li>
+        <li>Community governance for on-chain organisations</li>
+        <li>Any system where governance decisions must be traceable to explicit rules</li>
+      </ul>
+
       <h2 class="about-h2">Technical notes</h2>
-      <p class="about-p">GovLayer is built as a single Python intelligent contract on GenLayer, a blockchain that runs AI natively inside its virtual machine (GenVM). The AI audit uses <code style="font-family:var(--font-mono);font-size:12px;background:var(--surface-card);padding:1px 5px;border-radius:3px">gl.vm.run_nondet_unsafe</code> with a structural validator — multiple validator nodes must agree on the categorical decision (accept / revise / reject) before the result is committed to state.</p>
+      <p class="about-p">GovLayer is built as a single Python intelligent contract on GenLayer, a blockchain that runs AI natively inside its virtual machine (GenVM). The AI audit uses <code style="font-family:var(--font-mono);font-size:12px;background:var(--surface-card);padding:1px 5px;border-radius:3px">gl.vm.run_nondet_unsafe</code> with a structural validator — multiple validator nodes must agree on the categorical decision (accept / revise / reject) before the result is committed to state. This is what makes the AI verdict verifiable and deterministic on-chain.</p>
       <p class="about-p">Transactions on GenLayer Studionet typically take 1–4 minutes to finalize as validators reach consensus on the AI output. AI-heavy operations like proposal submission and dispute resolution can take 2–5 minutes.</p>
       <p class="about-p">The frontend is a single HTML file with no framework and no build step. It connects to the contract via the <a href="https://github.com/genlayerlabs/genlayer-js" target="_blank" class="about-link">genlayer-js SDK</a> loaded from esm.sh.</p>
 
@@ -2844,9 +3055,9 @@ function renderAbout() {
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
         ${[
           ['GenLayer Documentation', 'https://docs.genlayer.com'],
-          ['GenLayer Studio', 'https://studio.genlayer.com'],
-          ['genlayer-js SDK', 'https://github.com/genlayerlabs/genlayer-js'],
-          ['Contract source', 'https://github.com/betheanalyst/govlayer/blob/main/contract/govlayer.py'],
+          ['GenLayer Studio',        'https://studio.genlayer.com'],
+          ['genlayer-js SDK',        'https://github.com/genlayerlabs/genlayer-js'],
+          ['Contract source',        'https://github.com/betheanalyst/govlayer/blob/main/contract/govlayer.py'],
         ].map(([label, href]) => `<a href="${href}" target="_blank" rel="noopener" style="padding:8px 14px;background:var(--surface-card);border:.5px solid var(--border);border-radius:7px;font-size:13px;color:var(--text-primary);transition:border-color var(--dur-fast);display:inline-flex;align-items:center;gap:5px" onmouseover="this.style.borderColor='var(--ink-300)'" onmouseout="this.style.borderColor='var(--border)'">${label} ↗</a>`).join('')}
       </div>
 
